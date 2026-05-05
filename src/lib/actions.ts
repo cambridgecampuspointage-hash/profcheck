@@ -3,7 +3,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 import { calculateDistanceMeters } from '@/lib/gps'
-import { getDateRanges } from '@/lib/utils'
+import { endOfDateFilterExclusive, getDateRanges, startOfDateFilter } from '@/lib/utils'
 import crypto from 'crypto'
 import type {
   ScanResponse,
@@ -25,6 +25,12 @@ type TeacherBadgeMetrics = {
   weekCompletedSessions: number
   rejectedAttemptsLast30Days: number
   correctionRequestsLast30Days: number
+}
+
+function generateAccessCode(token: string): string {
+  const hash = crypto.createHash('sha256').update(token).digest()
+  const numeric = hash.readUInt32BE(0) % 1000000
+  return numeric.toString().padStart(6, '0')
 }
 
 function buildTeacherBadges(metrics: TeacherBadgeMetrics): TeacherBadge[] {
@@ -178,12 +184,14 @@ export async function generateQrToken(roomId: string) {
   const isDemo = await isDemoSessionEnabled()
 
   if (isDemo) {
+    const token = 'demo-token-' + Math.random().toString(36).substring(7)
     return {
       data: {
-        token: 'demo-token-' + Math.random().toString(36).substring(7),
+        token,
         center_id: 'demo-center-id',
         room_id: roomId,
-        expires_at: new Date(Date.now() + 20000).toISOString(),
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        access_code: generateAccessCode(token),
       },
     }
   }
@@ -211,7 +219,7 @@ export async function generateQrToken(roomId: string) {
 
   // Generate new token
   const token = crypto.randomBytes(32).toString('hex')
-  const expiresAt = new Date(Date.now() + 20 * 1000).toISOString() // 20 seconds
+  const expiresAt = new Date(Date.now() + 60 * 1000).toISOString() // 60 seconds
 
   const { data: qrToken, error } = await admin
     .from('qr_tokens')
@@ -233,6 +241,47 @@ export async function generateQrToken(roomId: string) {
       center_id: qrToken.center_id,
       room_id: qrToken.room_id,
       expires_at: qrToken.expires_at,
+      access_code: generateAccessCode(qrToken.token),
+    },
+  }
+}
+
+export async function resolveAttendanceCode(code: string) {
+  const normalizedCode = code.trim()
+  if (!/^\d{6}$/.test(normalizedCode)) {
+    return { error: 'Le code doit contenir exactement 6 chiffres.' }
+  }
+
+  const { user } = await getSessionContext()
+  if (!user) return { error: 'Non authentifié' }
+
+  const admin = createAdminClient()
+  const now = new Date().toISOString()
+
+  const { data: activeTokens, error } = await admin
+    .from('qr_tokens')
+    .select('token, center_id, room_id, expires_at')
+    .eq('is_active', true)
+    .gt('expires_at', now)
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  if (error || !activeTokens?.length) {
+    return { error: 'Aucun code actif trouvé.' }
+  }
+
+  const match = activeTokens.find((tokenRow) => generateAccessCode(tokenRow.token) === normalizedCode)
+  if (!match) {
+    return { error: 'Code invalide ou expiré.' }
+  }
+
+  return {
+    data: {
+      token: match.token,
+      center_id: match.center_id,
+      room_id: match.room_id,
+      expires_at: match.expires_at,
+      access_code: normalizedCode,
     },
   }
 }
@@ -766,6 +815,36 @@ export async function updateTeacher(
   return { success: true }
 }
 
+export async function deleteTeacher(teacherId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { data: teacher, error: teacherError } = await admin
+    .from('teachers')
+    .select('id, user_id')
+    .eq('id', teacherId)
+    .single()
+
+  if (teacherError || !teacher) {
+    return { error: 'Professeur introuvable' }
+  }
+
+  const { error: deleteTeacherError } = await admin
+    .from('teachers')
+    .delete()
+    .eq('id', teacherId)
+
+  if (deleteTeacherError) return { error: deleteTeacherError.message }
+
+  if (teacher.user_id) {
+    const { error: deleteAuthError } = await admin.auth.admin.deleteUser(teacher.user_id)
+    if (deleteAuthError) return { error: deleteAuthError.message }
+  }
+
+  return { success: true }
+}
+
 export async function getReceptionUsers(): Promise<ReceptionUser[]> {
   const { user, role } = await getSessionContext()
   if (!user || role !== 'admin') return []
@@ -890,6 +969,20 @@ export async function createRoom(formData: {
   return { success: true }
 }
 
+export async function deleteRoom(roomId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('rooms')
+    .delete()
+    .eq('id', roomId)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
 export async function updateRoom(
   roomId: string,
   data: Partial<{ name: string; description: string; status: string }>
@@ -919,6 +1012,20 @@ export async function createCenter(formData: {
   return { success: true }
 }
 
+export async function deleteCenter(centerId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('centers')
+    .delete()
+    .eq('id', centerId)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
 // ─── ADMIN - ATTENDANCE ───────────────────────────────────────────────────────
 
 export async function getAttendanceSessions(filters?: {
@@ -940,8 +1047,8 @@ export async function getAttendanceSessions(filters?: {
   if (filters?.teacherId) query = query.eq('teacher_id', filters.teacherId)
   if (filters?.roomId) query = query.eq('room_id', filters.roomId)
   if (filters?.status) query = query.eq('status', filters.status)
-  if (filters?.dateFrom) query = query.gte('started_at', filters.dateFrom)
-  if (filters?.dateTo) query = query.lte('started_at', filters.dateTo)
+  if (filters?.dateFrom) query = query.gte('started_at', startOfDateFilter(filters.dateFrom))
+  if (filters?.dateTo) query = query.lt('started_at', endOfDateFilterExclusive(filters.dateTo))
 
   const { data } = await query.limit(200)
   return data || []
@@ -1008,18 +1115,25 @@ export async function reviewCorrectionRequest(
 export async function getTeacherReports(filters: {
   dateFrom: string
   dateTo: string
+  teacherId?: string
 }): Promise<TeacherReport[]> {
   const { user, role } = await getSessionContext()
   if (!user || role !== 'admin') return []
 
   const admin = createAdminClient()
 
-  const { data: sessions } = await admin
+  let query = admin
     .from('attendance_sessions')
     .select('teacher_id, duration_minutes, teacher:teachers(full_name, hourly_rate)')
     .eq('status', 'completed')
-    .gte('started_at', filters.dateFrom)
-    .lte('started_at', filters.dateTo)
+    .gte('started_at', startOfDateFilter(filters.dateFrom))
+    .lt('started_at', endOfDateFilterExclusive(filters.dateTo))
+
+  if (filters.teacherId) {
+    query = query.eq('teacher_id', filters.teacherId)
+  }
+
+  const { data: sessions } = await query
 
   if (!sessions || sessions.length === 0) return []
 

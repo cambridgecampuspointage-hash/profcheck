@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import {
   createReceptionUser,
   createTeacher,
+  deleteTeacher,
   getTeacherBadgeSummaries,
   getReceptionUsers,
   getTeachers,
@@ -11,7 +12,7 @@ import {
   updateTeacher,
 } from '@/lib/actions'
 import type { ReceptionUser, Teacher, TeacherBadgeSummary } from '@/lib/types'
-import { Edit2, Loader2, Plus, ShieldCheck, UserCheck, UserX, X } from 'lucide-react'
+import { Edit2, Loader2, Plus, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react'
 
 export default function TeachersPage() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
@@ -22,6 +23,7 @@ export default function TeachersPage() {
   const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null)
   const [editingReception, setEditingReception] = useState<ReceptionUser | null>(null)
   const [modalRole, setModalRole] = useState<'teacher' | 'reception'>('teacher')
+  const [deletingTeacherId, setDeletingTeacherId] = useState<string | null>(null)
 
   const fetchData = async () => {
     setLoading(true)
@@ -68,6 +70,25 @@ export default function TeachersPage() {
   const handleToggleReceptionStatus = async (profile: ReceptionUser) => {
     const newStatus = profile.status === 'active' ? 'inactive' : 'active'
     await updateReceptionUser(profile.id, { status: newStatus })
+    void fetchData()
+  }
+
+  const handleDeleteTeacher = async (teacher: Teacher) => {
+    const confirmation = window.prompt(
+      `Pour supprimer définitivement ${teacher.full_name}, tapez SUPPRIMER`
+    )
+
+    if (confirmation !== 'SUPPRIMER') return
+
+    setDeletingTeacherId(teacher.id)
+    const result = await deleteTeacher(teacher.id)
+    setDeletingTeacherId(null)
+
+    if (result.error) {
+      window.alert(result.error)
+      return
+    }
+
     void fetchData()
   }
 
@@ -189,6 +210,14 @@ export default function TeachersPage() {
                               onClick={() => handleToggleStatus(teacher)}
                             >
                               {teacher.status === 'active' ? <UserX size={15} /> : <UserCheck size={15} />}
+                            </button>
+                            <button
+                              className="brand-staff-icon-btn danger"
+                              disabled={deletingTeacherId === teacher.id}
+                              onClick={() => handleDeleteTeacher(teacher)}
+                              title="Supprimer définitivement"
+                            >
+                              {deletingTeacherId === teacher.id ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={15} />}
                             </button>
                           </div>
                         </td>

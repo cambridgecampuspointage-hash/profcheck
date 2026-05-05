@@ -4,11 +4,13 @@ import { useState, useEffect, useCallback, use } from 'react'
 import { generateQrToken } from '@/lib/actions'
 import { QRCodeSVG } from 'qrcode.react'
 import { Loader2, RefreshCw, AlertCircle } from 'lucide-react'
+import type { QrPayload } from '@/lib/types'
 
 export default function QrDisplayPage({ params }: { params: Promise<{ roomId: string }> }) {
   const { roomId } = use(params)
   const [qrData, setQrData] = useState('')
-  const [countdown, setCountdown] = useState(20)
+  const [manualCode, setManualCode] = useState('')
+  const [countdown, setCountdown] = useState(60)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -23,7 +25,8 @@ export default function QrDisplayPage({ params }: { params: Promise<{ roomId: st
     }
     if (result.data) {
       setQrData(JSON.stringify(result.data))
-      setCountdown(20)
+      setManualCode(result.data.access_code || '')
+      setCountdown(60)
     }
     setLoading(false)
   }, [roomId])
@@ -38,7 +41,8 @@ export default function QrDisplayPage({ params }: { params: Promise<{ roomId: st
       setError(result.error || '')
       if (result.data) {
         setQrData(JSON.stringify(result.data))
-        setCountdown(20)
+        setManualCode(result.data.access_code || '')
+        setCountdown(60)
       }
       setLoading(false)
     }
@@ -50,11 +54,13 @@ export default function QrDisplayPage({ params }: { params: Promise<{ roomId: st
     }
   }, [roomId])
 
-  // Auto-refresh every 18 seconds
+  const parsedPayload = qrData ? (JSON.parse(qrData) as QrPayload) : null
+
+  // Auto-refresh every 60 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       void fetchToken()
-    }, 18000)
+    }, 60000)
     return () => clearInterval(interval)
   }, [fetchToken])
 
@@ -62,7 +68,7 @@ export default function QrDisplayPage({ params }: { params: Promise<{ roomId: st
   useEffect(() => {
     const interval = setInterval(() => {
       setCountdown((prev) => {
-        if (prev <= 1) return 20
+        if (prev <= 1) return 60
         return prev - 1
       })
     }, 1000)
@@ -116,6 +122,33 @@ export default function QrDisplayPage({ params }: { params: Promise<{ roomId: st
               includeMargin
               style={{ display: 'block' }}
             />
+          </div>
+
+          <div style={{
+            background: 'rgba(255,255,255,0.92)',
+            borderRadius: 20,
+            padding: '1.5rem',
+            minWidth: 300,
+            marginBottom: '1.5rem',
+            textAlign: 'center',
+            boxShadow: '0 18px 40px rgba(0,0,0,0.16)',
+          }}>
+            <p style={{ color: '#64748b', fontSize: '0.9rem', marginBottom: '0.45rem' }}>
+              Code manuel de secours
+            </p>
+            <div style={{
+              fontSize: '2.8rem',
+              fontWeight: 800,
+              letterSpacing: '0.3rem',
+              color: '#1b2d5b',
+              fontVariantNumeric: 'tabular-nums',
+              marginBottom: '0.45rem',
+            }}>
+              {manualCode || parsedPayload?.access_code || '------'}
+            </div>
+            <p style={{ color: '#94a3b8', fontSize: '0.82rem' }}>
+              Le professeur peut saisir ce code si la caméra ne fonctionne pas.
+            </p>
           </div>
 
           {/* Countdown */}

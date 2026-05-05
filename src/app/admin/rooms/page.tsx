@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getRooms, getCenters, createRoom, updateRoom, createCenter } from '@/lib/actions'
+import { getRooms, getCenters, createRoom, updateRoom, createCenter, deleteRoom, deleteCenter } from '@/lib/actions'
 import type { Room, Center } from '@/lib/types'
-import { Plus, Edit2, QrCode, X, Loader2, Building2 } from 'lucide-react'
+import { Plus, Edit2, QrCode, X, Loader2, Building2, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 
 export default function RoomsPage() {
@@ -13,6 +13,8 @@ export default function RoomsPage() {
   const [showRoomModal, setShowRoomModal] = useState(false)
   const [showCenterModal, setShowCenterModal] = useState(false)
   const [editingRoom, setEditingRoom] = useState<Room | null>(null)
+  const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null)
+  const [deletingCenterId, setDeletingCenterId] = useState<string | null>(null)
 
   const fetchData = async () => {
     setLoading(true)
@@ -40,6 +42,38 @@ export default function RoomsPage() {
     }
   }, [])
 
+  const handleDeleteRoom = async (room: Room) => {
+    const confirmation = window.prompt(`Pour supprimer la salle "${room.name}", tapez SUPPRIMER`)
+    if (confirmation !== 'SUPPRIMER') return
+
+    setDeletingRoomId(room.id)
+    const result = await deleteRoom(room.id)
+    setDeletingRoomId(null)
+
+    if (result.error) {
+      window.alert(result.error)
+      return
+    }
+
+    void fetchData()
+  }
+
+  const handleDeleteCenter = async (center: Center) => {
+    const confirmation = window.prompt(`Pour supprimer le centre "${center.name}" et ses salles liées, tapez SUPPRIMER`)
+    if (confirmation !== 'SUPPRIMER') return
+
+    setDeletingCenterId(center.id)
+    const result = await deleteCenter(center.id)
+    setDeletingCenterId(null)
+
+    if (result.error) {
+      window.alert(result.error)
+      return
+    }
+
+    void fetchData()
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
@@ -60,41 +94,96 @@ export default function RoomsPage() {
         <div style={{ textAlign: 'center', padding: '3rem' }}>
           <Loader2 size={32} style={{ margin: '0 auto', animation: 'spin 1s linear infinite', color: '#6366f1' }} />
         </div>
-      ) : rooms.length === 0 ? (
-        <div className="card" style={{ textAlign: 'center', padding: '2.5rem', color: '#64748b' }}>
-          {centers.length === 0 ? 'Créez d\'abord un centre, puis ajoutez des salles.' : 'Aucune salle créée.'}
-        </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
-          {rooms.map((room) => (
-            <div key={room.id} className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.75rem' }}>
-                <div>
-                  <p style={{ fontWeight: 700, fontSize: '1rem' }}>{room.name}</p>
-                  <p style={{ color: '#64748b', fontSize: '0.8125rem' }}>
-                    {(room.center as Center)?.name || 'Centre inconnu'}
-                  </p>
-                </div>
-                <span className={`badge ${room.status === 'active' ? 'badge-active' : 'badge-rejected'}`}>
-                  {room.status === 'active' ? 'Active' : 'Inactive'}
-                </span>
-              </div>
-              {room.description && (
-                <p style={{ color: '#94a3b8', fontSize: '0.8125rem', marginBottom: '0.75rem' }}>{room.description}</p>
-              )}
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => { setEditingRoom(room); setShowRoomModal(true) }}
-                >
-                  <Edit2 size={14} /> Modifier
-                </button>
-                <Link href={`/admin/qr-display/${room.id}`} className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
-                  <QrCode size={14} /> Afficher QR
-                </Link>
-              </div>
+        <div style={{ display: 'grid', gap: '1.25rem' }}>
+          <section className="brand-card">
+            <div className="brand-panel-header">
+              <span className="brand-panel-title">Centres</span>
+              <span className="brand-panel-action">{centers.length} centre(s)</span>
             </div>
-          ))}
+
+            {centers.length === 0 ? (
+              <div className="brand-empty">Aucun centre créé.</div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem', padding: '1rem' }}>
+                {centers.map((center) => (
+                  <div key={center.id} className="brand-card-soft" style={{ padding: '1rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'start' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--brand-navy)' }}>{center.name}</div>
+                        <div style={{ color: 'var(--brand-subtle)', fontSize: '0.82rem', marginTop: '0.35rem' }}>{center.address || 'Adresse non renseignée'}</div>
+                        <div style={{ color: 'var(--brand-subtle)', fontSize: '0.78rem', marginTop: '0.5rem' }}>
+                          Rayon: {center.allowed_radius_meters}m
+                        </div>
+                      </div>
+                      <button
+                        className="brand-staff-icon-btn danger"
+                        disabled={deletingCenterId === center.id}
+                        onClick={() => handleDeleteCenter(center)}
+                        title="Supprimer le centre"
+                      >
+                        {deletingCenterId === center.id ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={15} />}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="brand-card">
+            <div className="brand-panel-header">
+              <span className="brand-panel-title">Salles</span>
+              <span className="brand-panel-action">{rooms.length} salle(s)</span>
+            </div>
+
+            {rooms.length === 0 ? (
+              <div className="brand-empty">
+                {centers.length === 0 ? 'Créez d’abord un centre, puis ajoutez des salles.' : 'Aucune salle créée.'}
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem', padding: '1rem' }}>
+                {rooms.map((room) => (
+                  <div key={room.id} className="card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.75rem' }}>
+                      <div>
+                        <p style={{ fontWeight: 700, fontSize: '1rem' }}>{room.name}</p>
+                        <p style={{ color: '#64748b', fontSize: '0.8125rem' }}>
+                          {(room.center as Center)?.name || 'Centre inconnu'}
+                        </p>
+                      </div>
+                      <span className={`badge ${room.status === 'active' ? 'badge-active' : 'badge-rejected'}`}>
+                        {room.status === 'active' ? 'Active' : 'Inactive'}
+                      </span>
+                    </div>
+                    {room.description && (
+                      <p style={{ color: '#94a3b8', fontSize: '0.8125rem', marginBottom: '0.75rem' }}>{room.description}</p>
+                    )}
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => { setEditingRoom(room); setShowRoomModal(true) }}
+                      >
+                        <Edit2 size={14} /> Modifier
+                      </button>
+                      <Link href={`/admin/qr-display/${room.id}`} className="btn btn-primary btn-sm" style={{ textDecoration: 'none' }}>
+                        <QrCode size={14} /> Afficher QR
+                      </Link>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ color: '#dc2626', borderColor: '#fecaca' }}
+                        disabled={deletingRoomId === room.id}
+                        onClick={() => handleDeleteRoom(room)}
+                      >
+                        {deletingRoomId === room.id ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={14} />}
+                        Supprimer
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       )}
 

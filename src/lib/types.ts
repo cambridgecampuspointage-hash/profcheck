@@ -133,6 +133,7 @@ export interface QrPayload {
   center_id: string
   room_id: string
   expires_at: string
+  access_code?: string
 }
 
 export interface ScanRequest {

@@ -40,11 +40,12 @@ export function hoursDecimal(minutes: number): string {
  */
 export function generateCsv(
   headers: string[],
-  rows: string[][]
+  rows: string[][],
+  delimiter = ','
 ): string {
-  const headerLine = headers.join(',')
+  const headerLine = headers.join(delimiter)
   const dataLines = rows.map((row) =>
-    row.map((cell) => `"${(cell ?? '').replace(/"/g, '""')}"`).join(',')
+    row.map((cell) => `"${(cell ?? '').replace(/"/g, '""')}"`).join(delimiter)
   )
   return [headerLine, ...dataLines].join('\n')
 }
@@ -80,4 +81,14 @@ export function getDateRanges() {
     startOfWeek: startOfWeek.toISOString(),
     startOfMonth: startOfMonth.toISOString(),
   }
+}
+
+export function startOfDateFilter(dateString: string): string {
+  const [year, month, day] = dateString.split('-').map(Number)
+  return new Date(year, month - 1, day, 0, 0, 0, 0).toISOString()
+}
+
+export function endOfDateFilterExclusive(dateString: string): string {
+  const [year, month, day] = dateString.split('-').map(Number)
+  return new Date(year, month - 1, day + 1, 0, 0, 0, 0).toISOString()
 }

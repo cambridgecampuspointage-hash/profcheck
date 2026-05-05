@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { BrowserQRCodeReader } from '@zxing/browser'
-import { validateAttendanceScan } from '@/lib/actions'
+import { resolveAttendanceCode, validateAttendanceScan } from '@/lib/actions'
 import { getCurrentPosition, getGeoErrorMessage } from '@/lib/gps'
 import type { QrPayload } from '@/lib/types'
 import {
@@ -14,6 +14,7 @@ import {
   Play,
   Square,
   ArrowLeft,
+  Keyboard,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -26,6 +27,9 @@ export default function ScanPage() {
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null)
   const [cameraError, setCameraError] = useState('')
   const [scanAttempt, setScanAttempt] = useState(0)
+  const [manualCode, setManualCode] = useState('')
+  const [manualError, setManualError] = useState('')
+  const [manualLoading, setManualLoading] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -150,12 +154,32 @@ export default function ScanPage() {
     }
   }
 
+  const handleManualCodeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setManualError('')
+    setManualLoading(true)
+
+    const result = await resolveAttendanceCode(manualCode)
+    setManualLoading(false)
+
+    if (result.error || !result.data) {
+      setManualError(result.error || 'Code invalide.')
+      return
+    }
+
+    stopCamera()
+    setQrPayload(result.data)
+    setStep('choose-action')
+  }
+
   const resetScan = () => {
     stopCamera()
     setQrPayload(null)
     setAction(null)
     setResult(null)
     setCameraError('')
+    setManualCode('')
+    setManualError('')
     setScanAttempt((current) => current + 1)
     setStep('scanning')
   }
@@ -171,18 +195,23 @@ export default function ScanPage() {
 
       {/* STEP: Scanning */}
       {step === 'scanning' && (
-        <div>
-          {cameraError ? (
-            <div className="card" style={{ textAlign: 'center', padding: '2rem' }}>
-              <Camera size={48} color="#ef4444" style={{ margin: '0 auto 1rem' }} />
-              <p style={{ color: '#ef4444', fontWeight: 600, marginBottom: '0.5rem' }}>
+        <div style={{ display: 'grid', gap: '1rem' }}>
+          {cameraError && (
+            <div className="card" style={{ textAlign: 'center', padding: '1.25rem' }}>
+              <Camera size={40} color="#ef4444" style={{ margin: '0 auto 0.75rem' }} />
+              <p style={{ color: '#ef4444', fontWeight: 600, marginBottom: '0.75rem' }}>
                 {cameraError}
               </p>
-              <button className="btn btn-primary" onClick={() => setScanAttempt((current) => current + 1)}>
-                Réessayer
+              <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                Vous pouvez quand même pointer avec le code manuel ci-dessous.
+              </p>
+              <button className="btn btn-secondary" onClick={() => setScanAttempt((current) => current + 1)}>
+                Réessayer la caméra
               </button>
             </div>
-          ) : (
+          )}
+
+          {!cameraError && (
             <div style={{ position: 'relative' }}>
               <div style={{
                 borderRadius: 20,
@@ -224,6 +253,38 @@ export default function ScanPage() {
               </p>
             </div>
           )}
+
+          <div className="card" style={{ padding: '1.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.75rem' }}>
+              <Keyboard size={18} color="#6366f1" />
+              <strong>Entrer un code manuel</strong>
+            </div>
+            <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1rem' }}>
+              Saisissez le code manuel à 6 chiffres affiché avec le QR code.
+            </p>
+            <form onSubmit={handleManualCodeSubmit} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <input
+                className="input"
+                inputMode="numeric"
+                pattern="\d{6}"
+                maxLength={6}
+                placeholder="000000"
+                value={manualCode}
+                onChange={(e) => {
+                  setManualCode(e.target.value.replace(/\D/g, '').slice(0, 6))
+                  if (manualError) setManualError('')
+                }}
+                style={{ flex: 1, minWidth: 160, letterSpacing: '0.18rem', fontVariantNumeric: 'tabular-nums' }}
+                required
+              />
+              <button className="btn btn-primary" type="submit" disabled={manualLoading || manualCode.length !== 6}>
+                {manualLoading ? <><div className="spinner" /> Vérification...</> : 'Valider le code'}
+              </button>
+            </form>
+            {manualError && (
+              <p style={{ color: '#dc2626', fontSize: '0.82rem', marginTop: '0.75rem' }}>{manualError}</p>
+            )}
+          </div>
         </div>
       )}
 

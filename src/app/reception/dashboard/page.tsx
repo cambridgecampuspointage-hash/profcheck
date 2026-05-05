@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Clock3, QrCode, Users } from 'lucide-react'
+import { ArrowLeft, Clock3, QrCode, Users } from 'lucide-react'
 import { getAdminStats, getRooms, getUserProfile } from '@/lib/actions'
 import type { Center, Room } from '@/lib/types'
 
@@ -11,6 +11,18 @@ export default async function ReceptionDashboard() {
   return (
     <div>
       <div className="brand-page-header">
+        {profile?.role === 'admin' && (
+          <div style={{ marginBottom: '0.85rem' }}>
+            <Link
+              href="/admin/dashboard"
+              className="brand-staff-btn brand-staff-btn-secondary"
+              style={{ display: 'inline-flex', textDecoration: 'none' }}
+            >
+              <ArrowLeft size={16} />
+              Retour à l&apos;accueil admin
+            </Link>
+          </div>
+        )}
         <h1 className="brand-page-title">Accueil réception</h1>
         <p className="brand-page-subtitle">
           Bienvenue{profile?.full_name ? `, ${profile.full_name}` : ''}. Affiche rapidement les QR codes des salles.
