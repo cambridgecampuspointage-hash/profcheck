@@ -110,10 +110,12 @@ export function BrandShell({
         </nav>
 
         <div className="brand-sidebar-footer">
-          <div className="brand-avatar">CC</div>
-          <div className="brand-sidebar-meta">
-            <span className="brand-sidebar-role">{sectionLabel}</span>
-            <span className="brand-sidebar-caption">ProfCheck</span>
+          <div className="brand-sidebar-profile">
+            <div className="brand-avatar">CC</div>
+            <div className="brand-sidebar-meta">
+              <span className="brand-sidebar-role">{sectionLabel}</span>
+              <span className="brand-sidebar-caption">Session active sur ProfCheck</span>
+            </div>
           </div>
           <button type="button" className="brand-logout" onClick={handleLogout}>
             <LogOut size={16} />

@@ -4,16 +4,18 @@ import { useEffect, useState } from 'react'
 import {
   createReceptionUser,
   createTeacher,
+  getTeacherBadgeSummaries,
   getReceptionUsers,
   getTeachers,
   updateReceptionUser,
   updateTeacher,
 } from '@/lib/actions'
-import type { ReceptionUser, Teacher } from '@/lib/types'
+import type { ReceptionUser, Teacher, TeacherBadgeSummary } from '@/lib/types'
 import { Edit2, Loader2, Plus, ShieldCheck, UserCheck, UserX, X } from 'lucide-react'
 
 export default function TeachersPage() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
+  const [badgeSummaries, setBadgeSummaries] = useState<TeacherBadgeSummary[]>([])
   const [receptionUsers, setReceptionUsers] = useState<ReceptionUser[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -23,9 +25,14 @@ export default function TeachersPage() {
 
   const fetchData = async () => {
     setLoading(true)
-    const [teacherData, receptionData] = await Promise.all([getTeachers(), getReceptionUsers()])
+    const [teacherData, receptionData, teacherBadges] = await Promise.all([
+      getTeachers(),
+      getReceptionUsers(),
+      getTeacherBadgeSummaries(),
+    ])
     setTeachers(teacherData as Teacher[])
     setReceptionUsers(receptionData as ReceptionUser[])
+    setBadgeSummaries(teacherBadges as TeacherBadgeSummary[])
     setLoading(false)
   }
 
@@ -33,10 +40,15 @@ export default function TeachersPage() {
     let active = true
 
     async function loadData() {
-      const [teacherData, receptionData] = await Promise.all([getTeachers(), getReceptionUsers()])
+      const [teacherData, receptionData, teacherBadges] = await Promise.all([
+        getTeachers(),
+        getReceptionUsers(),
+        getTeacherBadgeSummaries(),
+      ])
       if (!active) return
       setTeachers(teacherData as Teacher[])
       setReceptionUsers(receptionData as ReceptionUser[])
+      setBadgeSummaries(teacherBadges as TeacherBadgeSummary[])
       setLoading(false)
     }
 
@@ -129,6 +141,7 @@ export default function TeachersPage() {
                       <th>Téléphone</th>
                       <th>Langues</th>
                       <th>Taux horaire</th>
+                      <th>Badges</th>
                       <th>Statut</th>
                       <th>Actions</th>
                     </tr>
@@ -141,6 +154,18 @@ export default function TeachersPage() {
                         <td>{teacher.phone || '-'}</td>
                         <td>{teacher.languages?.join(', ') || '-'}</td>
                         <td>{teacher.hourly_rate}€/h</td>
+                        <td>
+                          <div className="brand-badge-chip-list">
+                            {(badgeSummaries.find((summary) => summary.teacher_id === teacher.id)?.badges || []).slice(0, 2).map((badge) => (
+                              <span key={badge.id} className={`brand-mini-badge ${badge.tone}`}>
+                                {badge.name}
+                              </span>
+                            ))}
+                            {!((badgeSummaries.find((summary) => summary.teacher_id === teacher.id)?.badges || []).length) && (
+                              <span style={{ color: 'var(--brand-subtle)', fontSize: '0.78rem' }}>Aucun</span>
+                            )}
+                          </div>
+                        </td>
                         <td>
                           <span className={`brand-badge ${teacher.status === 'active' ? 'success' : 'danger'}`}>
                             {teacher.status === 'active' ? 'Actif' : 'Inactif'}

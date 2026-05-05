@@ -1,49 +1,64 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
-import { Mail, ArrowLeft, CheckCircle, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { AlertCircle, CheckCircle, KeyRound } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 
-export default function ForgotPasswordPage() {
-  const [email, setEmail] = useState('')
+export default function ResetPasswordPage() {
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [loading, setLoading] = useState(false)
-  const [sent, setSent] = useState(false)
+  const [success, setSuccess] = useState(false)
   const [error, setError] = useState('')
+  const router = useRouter()
   const supabase = createClient()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
     setError('')
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') || window.location.origin
+    if (password.length < 8) {
+      setError('Le nouveau mot de passe doit contenir au moins 8 caractères.')
+      return
+    }
 
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${appUrl}/auth/callback?next=/reset-password`,
-    })
+    if (password !== confirmPassword) {
+      setError('Les mots de passe ne correspondent pas.')
+      return
+    }
 
-    if (resetError) {
-      setError('Erreur lors de l\'envoi. Veuillez réessayer.')
+    setLoading(true)
+
+    const { error: updateError } = await supabase.auth.updateUser({ password })
+
+    if (updateError) {
+      setError('Impossible de modifier le mot de passe. Veuillez réessayer.')
       setLoading(false)
       return
     }
 
-    setSent(true)
+    await supabase.auth.signOut()
+    setSuccess(true)
     setLoading(false)
+
+    setTimeout(() => {
+      router.push('/login?reset=success')
+    }, 1200)
   }
 
   return (
     <div className="login-page">
       <div className="login-container">
         <div className="login-header">
-          <h1 className="login-title" style={{ fontSize: '1.5rem' }}>Mot de passe oublié</h1>
+          <h1 className="login-title" style={{ fontSize: '1.5rem' }}>Nouveau mot de passe</h1>
           <p className="login-subtitle">
-            Entrez votre email pour recevoir un lien de réinitialisation.
+            Définissez un nouveau mot de passe pour sécuriser votre compte.
           </p>
         </div>
 
-        {sent ? (
+        {success ? (
           <div style={{ textAlign: 'center' }}>
             <div style={{
               width: 64, height: 64, borderRadius: '50%', background: '#d1fae5',
@@ -53,15 +68,11 @@ export default function ForgotPasswordPage() {
               <CheckCircle size={32} color="#10b981" />
             </div>
             <p style={{ color: '#374151', fontWeight: 500, marginBottom: '0.5rem' }}>
-              Email envoyé !
+              Mot de passe mis à jour.
             </p>
-            <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
-              Vérifiez votre boîte de réception pour le lien de réinitialisation.
+            <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
+              Redirection vers la connexion...
             </p>
-            <Link href="/login" className="btn btn-secondary" style={{ display: 'inline-flex' }}>
-              <ArrowLeft size={16} />
-              Retour à la connexion
-            </Link>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="login-form">
@@ -73,15 +84,32 @@ export default function ForgotPasswordPage() {
             )}
 
             <div className="form-group">
-              <label htmlFor="email" className="form-label">Adresse email</label>
+              <label htmlFor="password" className="form-label">Nouveau mot de passe</label>
               <input
-                id="email"
-                type="email"
+                id="password"
+                type="password"
                 className="input"
-                placeholder="professeur@exemple.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Minimum 8 caractères"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 required
+                minLength={8}
+                autoComplete="new-password"
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="confirmPassword" className="form-label">Confirmer le mot de passe</label>
+              <input
+                id="confirmPassword"
+                type="password"
+                className="input"
+                placeholder="Confirmez le mot de passe"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                minLength={8}
+                autoComplete="new-password"
               />
             </div>
 
@@ -89,18 +117,17 @@ export default function ForgotPasswordPage() {
               {loading ? (
                 <>
                   <div className="spinner" />
-                  Envoi...
+                  Mise à jour...
                 </>
               ) : (
                 <>
-                  <Mail size={18} />
-                  Envoyer le lien
+                  <KeyRound size={18} />
+                  Enregistrer le nouveau mot de passe
                 </>
               )}
             </button>
 
             <Link href="/login" className="forgot-link">
-              <ArrowLeft size={14} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
               Retour à la connexion
             </Link>
           </form>

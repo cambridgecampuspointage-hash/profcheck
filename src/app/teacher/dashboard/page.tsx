@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { Calendar, CalendarDays, Clock3, History, Play, QrCode } from 'lucide-react'
-import { getTeacherStats, getUserProfile } from '@/lib/actions'
+import { getTeacherBadges, getTeacherStats, getUserProfile } from '@/lib/actions'
 
 const statItems = [
   { label: "Aujourd'hui", icon: <Clock3 size={20} />, iconColor: '#1b2d5b', bgColor: '#eef1f8' },
@@ -13,7 +13,7 @@ export default async function TeacherDashboard() {
   const profile = await getUserProfile()
   if (!profile) redirect('/login')
 
-  const stats = await getTeacherStats()
+  const [stats, badges] = await Promise.all([getTeacherStats(), getTeacherBadges()])
   const values = [
     `${stats?.todayHours?.toFixed(1) || '0.0'}h`,
     `${stats?.weekHours?.toFixed(1) || '0.0'}h`,
@@ -71,6 +71,35 @@ export default async function TeacherDashboard() {
           </div>
         ))}
       </div>
+
+      <section className="brand-card brand-card-pad" style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center', marginBottom: '0.9rem', flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-serif-brand)', color: 'var(--brand-navy)', fontSize: '1.1rem', fontWeight: 700 }}>
+              Mes badges
+            </div>
+            <div style={{ color: 'var(--brand-muted)', fontSize: '0.84rem', marginTop: '0.2rem' }}>
+              Distinctions gagnees selon ton rythme, ta fiabilite et ta discipline.
+            </div>
+          </div>
+          <span className="brand-panel-action">{badges.length} badge(s)</span>
+        </div>
+
+        {badges.length === 0 ? (
+          <div className="brand-empty" style={{ minHeight: 120 }}>
+            Continue tes sessions pour debloquer tes premieres distinctions.
+          </div>
+        ) : (
+          <div className="brand-badge-grid">
+            {badges.map((badge) => (
+              <div key={badge.id} className={`brand-creative-badge ${badge.tone}`}>
+                <div className="brand-creative-badge-title">{badge.name}</div>
+                <div className="brand-creative-badge-copy">{badge.description}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="brand-action-grid">
         <Link href="/teacher/scan" className="brand-card brand-action-card">

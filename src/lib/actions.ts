@@ -13,9 +13,139 @@ import type {
   AttendanceSession,
   AttendanceCorrectionRequest,
   ReceptionUser,
+  TeacherBadge,
+  TeacherBadgeSummary,
 } from '@/lib/types'
 
 const DEMO_MODE_ENABLED = process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === 'true'
+
+type TeacherBadgeMetrics = {
+  completedSessions: number
+  monthMinutes: number
+  weekCompletedSessions: number
+  rejectedAttemptsLast30Days: number
+  correctionRequestsLast30Days: number
+}
+
+function buildTeacherBadges(metrics: TeacherBadgeMetrics): TeacherBadge[] {
+  const badges: TeacherBadge[] = []
+
+  if (metrics.completedSessions >= 1) {
+    badges.push({
+      id: 'premier-elan',
+      name: 'Premier Elan',
+      description: 'Premiere session validee avec succes.',
+      tone: 'navy',
+    })
+  }
+
+  if (metrics.completedSessions >= 10) {
+    badges.push({
+      id: 'aiguille-dor',
+      name: "Aiguille d'Or",
+      description: 'Dix sessions terminees avec un rythme solide.',
+      tone: 'gold',
+    })
+  }
+
+  if (metrics.weekCompletedSessions >= 3) {
+    badges.push({
+      id: 'cap-constant',
+      name: 'Cap Constant',
+      description: 'Presence reguliere sur la semaine en cours.',
+      tone: 'emerald',
+    })
+  }
+
+  if (metrics.monthMinutes >= 20 * 60) {
+    badges.push({
+      id: 'presence-signature',
+      name: 'Presence Signature',
+      description: 'Vingt heures ou plus validees ce mois-ci.',
+      tone: 'rose',
+    })
+  }
+
+  if (metrics.monthMinutes >= 40 * 60) {
+    badges.push({
+      id: 'pilier-de-salle',
+      name: 'Pilier de Salle',
+      description: 'Quarante heures ou plus validees ce mois-ci.',
+      tone: 'gold',
+    })
+  }
+
+  if (metrics.rejectedAttemptsLast30Days === 0 && metrics.completedSessions >= 5) {
+    badges.push({
+      id: 'main-sure',
+      name: 'Main Sure',
+      description: 'Aucun rejet recent sur les scans de pointage.',
+      tone: 'emerald',
+    })
+  }
+
+  if (
+    metrics.completedSessions >= 20 &&
+    metrics.rejectedAttemptsLast30Days === 0 &&
+    metrics.correctionRequestsLast30Days === 0
+  ) {
+    badges.push({
+      id: 'craie-dhonneur',
+      name: "Craie d'Honneur",
+      description: 'Parcours exemplaire sans incident recent.',
+      tone: 'navy',
+    })
+  }
+
+  return badges
+}
+
+async function getTeacherBadgeMetrics(teacherId: string) {
+  const admin = createAdminClient()
+  const { startOfWeek, startOfMonth } = getDateRanges()
+  const last30Days = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+
+  const [completedSessionsRes, monthSessionsRes, weekSessionsRes, rejectedAttemptsRes, correctionRequestsRes] = await Promise.all([
+    admin
+      .from('attendance_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('teacher_id', teacherId)
+      .eq('status', 'completed'),
+    admin
+      .from('attendance_sessions')
+      .select('duration_minutes')
+      .eq('teacher_id', teacherId)
+      .eq('status', 'completed')
+      .gte('started_at', startOfMonth),
+    admin
+      .from('attendance_sessions')
+      .select('id', { count: 'exact', head: true })
+      .eq('teacher_id', teacherId)
+      .eq('status', 'completed')
+      .gte('started_at', startOfWeek),
+    admin
+      .from('attendance_attempts')
+      .select('id', { count: 'exact', head: true })
+      .eq('teacher_id', teacherId)
+      .eq('status', 'rejected')
+      .gte('created_at', last30Days),
+    admin
+      .from('attendance_correction_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('teacher_id', teacherId)
+      .gte('created_at', last30Days),
+  ])
+
+  const monthMinutes = (monthSessionsRes.data || []).reduce((sum, session) => sum + (session.duration_minutes || 0), 0)
+
+  return {
+    completedSessions: completedSessionsRes.count || 0,
+    monthMinutes,
+    weekCompletedSessions: weekSessionsRes.count || 0,
+    rejectedAttemptsLast30Days: rejectedAttemptsRes.count || 0,
+    correctionRequestsLast30Days: correctionRequestsRes.count || 0,
+  }
+}
 
 async function getSessionContext() {
   const supabase = await createClient()
@@ -329,6 +459,26 @@ export async function getTeacherStats(): Promise<TeacherStats | null> {
   }
 }
 
+export async function getTeacherBadges(): Promise<TeacherBadge[]> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const admin = createAdminClient()
+  const { data: teacher } = await admin
+    .from('teachers')
+    .select('id')
+    .eq('user_id', user.id)
+    .single()
+
+  if (!teacher) return []
+
+  const metrics = await getTeacherBadgeMetrics(teacher.id)
+  return buildTeacherBadges(metrics)
+}
+
 // ─── TEACHER HISTORY ──────────────────────────────────────────────────────────
 
 export async function getTeacherHistory() {
@@ -528,6 +678,27 @@ export async function getTeachers() {
     .select('*')
     .order('created_at', { ascending: false })
   return data || []
+}
+
+export async function getTeacherBadgeSummaries(): Promise<TeacherBadgeSummary[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  const { data: teachers } = await admin
+    .from('teachers')
+    .select('id')
+
+  if (!teachers?.length) return []
+
+  const summaries = await Promise.all(
+    teachers.map(async (teacher) => ({
+      teacher_id: teacher.id,
+      badges: buildTeacherBadges(await getTeacherBadgeMetrics(teacher.id)),
+    }))
+  )
+
+  return summaries
 }
 
 export async function createTeacher(formData: {

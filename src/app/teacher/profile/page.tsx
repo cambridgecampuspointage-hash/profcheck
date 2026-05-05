@@ -1,4 +1,4 @@
-import { getUserProfile } from '@/lib/actions'
+import { getTeacherBadges, getUserProfile } from '@/lib/actions'
 import { redirect } from 'next/navigation'
 import { User, Mail, Phone } from 'lucide-react'
 import { LogoutButton } from './logout-button'
@@ -6,6 +6,7 @@ import { LogoutButton } from './logout-button'
 export default async function TeacherProfilePage() {
   const profile = await getUserProfile()
   if (!profile) redirect('/login')
+  const badges = await getTeacherBadges()
 
   return (
     <div className="page-enter">
@@ -74,6 +75,26 @@ export default async function TeacherProfilePage() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="brand-card brand-card-pad" style={{ marginBottom: '1rem' }}>
+        <div style={{ fontFamily: 'var(--font-serif-brand)', color: 'var(--brand-navy)', fontSize: '1.1rem', fontWeight: 700, marginBottom: '0.9rem' }}>
+          Distinctions
+        </div>
+        {badges.length === 0 ? (
+          <div style={{ color: 'var(--brand-muted)', fontSize: '0.9rem' }}>
+            Aucune distinction pour le moment.
+          </div>
+        ) : (
+          <div className="brand-badge-grid">
+            {badges.map((badge) => (
+              <div key={badge.id} className={`brand-creative-badge ${badge.tone}`}>
+                <div className="brand-creative-badge-title">{badge.name}</div>
+                <div className="brand-creative-badge-copy">{badge.description}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <LogoutButton />

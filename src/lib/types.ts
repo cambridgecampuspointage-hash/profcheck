@@ -175,3 +175,15 @@ export interface TeacherReport {
   hourly_rate: number
   estimated_payment: number
 }
+
+export interface TeacherBadge {
+  id: string
+  name: string
+  description: string
+  tone: 'gold' | 'navy' | 'emerald' | 'rose'
+}
+
+export interface TeacherBadgeSummary {
+  teacher_id: string
+  badges: TeacherBadge[]
+}
