@@ -2,6 +2,7 @@ import { getTeacherBadges, getUserProfile } from '@/lib/actions'
 import { redirect } from 'next/navigation'
 import { User, Mail, Phone } from 'lucide-react'
 import { LogoutButton } from './logout-button'
+import { DownloadReportButton } from '@/components/DownloadReportButton'
 
 export default async function TeacherProfilePage() {
   const profile = await getUserProfile()
@@ -96,6 +97,12 @@ export default async function TeacherProfilePage() {
           </div>
         )}
       </div>
+
+      {profile.role === 'teacher' ? (
+        <div style={{ marginBottom: '1rem' }}>
+          <DownloadReportButton />
+        </div>
+      ) : null}
 
       <LogoutButton />
     </div>

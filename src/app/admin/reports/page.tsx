@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { getTeacherReports, getTeachers } from '@/lib/actions'
-import { downloadCsv, formatDate, generateCsv } from '@/lib/utils'
+import { buildPayrollCsv, downloadCsv, payrollFilename } from '@/lib/csv'
 import type { Teacher, TeacherReport } from '@/lib/types'
 import { ArrowDownAZ, BarChart3, Download, Loader2, Search } from 'lucide-react'
 
@@ -70,23 +70,20 @@ export default function ReportsPage() {
 
   const handleExportCsv = () => {
     const selectedTeacher = teachers.find((teacher) => teacher.id === teacherId)
-    const infoRows = [
-      ['Rapport de pointage', '', '', '', ''],
-      ['Professeur', selectedTeacher?.full_name || 'Tous', '', '', ''],
-      ['Période', `${formatDate(dateFrom)} au ${formatDate(dateTo)}`, '', '', ''],
-      ['Généré le', new Date().toLocaleString('fr-FR'), '', '', ''],
-      ['', '', '', '', ''],
-    ]
-    const headers = ['Professeur', 'Sessions', 'Heures totales', 'Taux horaire (€)', 'Paiement estimé (€)']
-    const rows = filteredReports.map((r) => [
-      r.teacher_name,
-      String(r.total_sessions),
-      r.total_hours.toFixed(2).replace('.', ','),
-      r.hourly_rate.toFixed(2).replace('.', ','),
-      r.estimated_payment.toFixed(2).replace('.', ','),
-    ])
-    const csv = [...infoRows.map((row) => row.join(';')), generateCsv(headers, rows, ';')].join('\n')
-    downloadCsv(csv, `rapport_${dateFrom}_${dateTo}.csv`)
+    const csv = buildPayrollCsv({
+      teacherName: selectedTeacher?.full_name ?? 'Tous',
+      dateFrom,
+      dateTo,
+      rows: filteredReports.map((report) => ({
+        teacher_name: report.teacher_name,
+        total_sessions: report.total_sessions,
+        total_hours: report.total_hours,
+        hourly_rate: report.hourly_rate,
+        estimated_payment: report.estimated_payment,
+      })),
+    })
+
+    downloadCsv(csv, payrollFilename(dateFrom, dateTo))
   }
 
   const filteredReports = [...reports]

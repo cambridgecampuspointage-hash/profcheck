@@ -16,6 +16,7 @@ import type {
   TeacherBadge,
   TeacherBadgeSummary,
 } from '@/lib/types'
+import type { TeacherReportData } from '@/lib/pdf/generateTeacherReport'
 
 const DEMO_MODE_ENABLED = process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === 'true'
 
@@ -553,6 +554,67 @@ export async function getTeacherHistory() {
     .limit(100)
 
   return data || []
+}
+
+export async function getMyTeacherReportData(dateFrom: string, dateTo: string): Promise<{ data?: TeacherReportData; error?: string }> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'teacher') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { data: teacher } = await admin
+    .from('teachers')
+    .select('id, full_name, email, hourly_rate')
+    .eq('user_id', user.id)
+    .single()
+
+  if (!teacher) return { error: 'Profil professeur introuvable.' }
+
+  const { data: sessions, error } = await admin
+    .from('attendance_sessions')
+    .select('started_at, ended_at, duration_minutes, status, room:rooms(name)')
+    .eq('teacher_id', teacher.id)
+    .eq('status', 'completed')
+    .gte('started_at', startOfDateFilter(dateFrom))
+    .lt('started_at', endOfDateFilterExclusive(dateTo))
+    .order('started_at', { ascending: true })
+
+  if (error) return { error: error.message }
+
+  const safeSessions = (sessions || []).map((session) => {
+    const startedAt = new Date(session.started_at)
+    const endedAt = session.ended_at ? new Date(session.ended_at) : null
+    const roomName = (session.room as { name?: string } | null)?.name
+
+    return {
+      date: session.started_at,
+      start_time: Number.isNaN(startedAt.getTime()) ? '—' : startedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      end_time: !endedAt || Number.isNaN(endedAt.getTime()) ? '—' : endedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      duration_minutes: session.duration_minutes || 0,
+      room: roomName || undefined,
+      subject: undefined,
+      status: 'validé' as const,
+    }
+  })
+
+  const totalMinutes = safeSessions.reduce((sum, session) => sum + session.duration_minutes, 0)
+  const totalHours = totalMinutes / 60
+  const hourlyRate = teacher.hourly_rate || 0
+  const estimatedPayment = totalHours * hourlyRate
+
+  return {
+    data: {
+      teacher_name: teacher.full_name,
+      teacher_email: teacher.email || undefined,
+      teacher_id: teacher.id,
+      period_from: dateFrom,
+      period_to: dateTo,
+      hourly_rate: hourlyRate,
+      total_sessions: safeSessions.length,
+      total_hours: Math.round(totalHours * 100) / 100,
+      estimated_payment: Math.round(estimatedPayment * 100) / 100,
+      sessions: safeSessions,
+    },
+  }
 }
 
 export async function getTeacherCorrectionRequests(): Promise<AttendanceCorrectionRequest[]> {
