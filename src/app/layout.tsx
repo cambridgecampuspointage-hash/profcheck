@@ -6,8 +6,11 @@ export const metadata: Metadata = {
   description: 'Système de pointage intelligent pour centres de langues. Suivi des heures de travail des professeurs avec QR code et GPS.',
   manifest: '/manifest.json',
   icons: {
-    icon: '/favicon.ico',
-    apple: '/icon-192.png',
+    icon: [
+      { url: '/icon.png', type: 'image/png' },
+      { url: '/cambridge_campus_rabat_logo.png', type: 'image/png' },
+    ],
+    apple: '/apple-icon.png',
   },
 }
 
