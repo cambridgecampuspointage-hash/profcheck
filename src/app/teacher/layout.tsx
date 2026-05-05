@@ -1,5 +1,3 @@
-'use client'
-
 import { Clock, History, LayoutDashboard, QrCode, User } from 'lucide-react'
 import { BrandShell, type BrandNavItem } from '@/components/brand-shell'
 

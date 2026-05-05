@@ -99,6 +99,23 @@ export interface AttendanceAttempt {
   room?: Room
 }
 
+export interface AttendanceCorrectionRequest {
+  id: string
+  teacher_id: string
+  session_id: string | null
+  request_type: 'missed_start' | 'missed_end' | 'gps_issue' | 'other'
+  requested_start_at: string | null
+  requested_end_at: string | null
+  reason: string
+  status: 'pending' | 'approved' | 'rejected'
+  admin_notes: string | null
+  reviewed_at: string | null
+  created_at: string
+  teacher?: Teacher
+  session?: AttendanceSession
+  room?: Room
+}
+
 export interface Course {
   id: string
   teacher_id: string

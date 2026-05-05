@@ -18,10 +18,14 @@ export function BrandShell({
   children,
   navItems,
   sectionLabel,
+  notificationCount = 0,
+  notificationHref,
 }: {
   children: React.ReactNode
   navItems: BrandNavItem[]
   sectionLabel: string
+  notificationCount?: number
+  notificationHref?: string
 }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -136,9 +140,25 @@ export function BrandShell({
 
           <div className="brand-topbar-right">
             <span className="brand-date-pill">{todayFormatted}</span>
-            <div className="brand-icon-btn">
-              <Bell size={16} />
-            </div>
+            {notificationHref ? (
+              <Link href={notificationHref} className="brand-icon-btn brand-notification-btn" aria-label="Notifications">
+                <Bell size={16} />
+                {notificationCount > 0 && (
+                  <span className="brand-notification-badge">
+                    {notificationCount > 9 ? '9+' : notificationCount}
+                  </span>
+                )}
+              </Link>
+            ) : (
+              <div className="brand-icon-btn brand-notification-btn" aria-label="Notifications">
+                <Bell size={16} />
+                {notificationCount > 0 && (
+                  <span className="brand-notification-badge">
+                    {notificationCount > 9 ? '9+' : notificationCount}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </header>
 

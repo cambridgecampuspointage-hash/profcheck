@@ -5,7 +5,15 @@ import { createClient } from '@/lib/supabase/server'
 import { calculateDistanceMeters } from '@/lib/gps'
 import { getDateRanges } from '@/lib/utils'
 import crypto from 'crypto'
-import type { ScanResponse, TeacherStats, AdminStats, TeacherReport, AttendanceSession, ReceptionUser } from '@/lib/types'
+import type {
+  ScanResponse,
+  TeacherStats,
+  AdminStats,
+  TeacherReport,
+  AttendanceSession,
+  AttendanceCorrectionRequest,
+  ReceptionUser,
+} from '@/lib/types'
 
 const DEMO_MODE_ENABLED = process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === 'true'
 
@@ -346,6 +354,77 @@ export async function getTeacherHistory() {
     .limit(100)
 
   return data || []
+}
+
+export async function getTeacherCorrectionRequests(): Promise<AttendanceCorrectionRequest[]> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const admin = createAdminClient()
+  const { data: teacher } = await admin
+    .from('teachers')
+    .select('id')
+    .eq('user_id', user.id)
+    .single()
+
+  if (!teacher) return []
+
+  const { data } = await admin
+    .from('attendance_correction_requests')
+    .select('*, session:attendance_sessions(*, room:rooms(name), center:centers(name))')
+    .eq('teacher_id', teacher.id)
+    .order('created_at', { ascending: false })
+    .limit(100)
+
+  return (data || []) as AttendanceCorrectionRequest[]
+}
+
+export async function createCorrectionRequest(input: {
+  session_id?: string
+  request_type: 'missed_start' | 'missed_end' | 'gps_issue' | 'other'
+  requested_start_at?: string
+  requested_end_at?: string
+  reason: string
+}) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'teacher') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { data: teacher } = await admin
+    .from('teachers')
+    .select('id')
+    .eq('user_id', user.id)
+    .single()
+
+  if (!teacher) return { error: 'Profil professeur non trouvé' }
+
+  if (input.session_id) {
+    const { data: session } = await admin
+      .from('attendance_sessions')
+      .select('id')
+      .eq('id', input.session_id)
+      .eq('teacher_id', teacher.id)
+      .maybeSingle()
+
+    if (!session) return { error: 'Session introuvable pour cette demande' }
+  }
+
+  const { error } = await admin
+    .from('attendance_correction_requests')
+    .insert({
+      teacher_id: teacher.id,
+      session_id: input.session_id || null,
+      request_type: input.request_type,
+      requested_start_at: input.requested_start_at || null,
+      requested_end_at: input.requested_end_at || null,
+      reason: input.reason,
+    })
+
+  if (error) return { error: error.message }
+  return { success: true }
 }
 
 // ─── ADMIN STATS ──────────────────────────────────────────────────────────────
@@ -695,6 +774,62 @@ export async function getAttendanceSessions(filters?: {
 
   const { data } = await query.limit(200)
   return data || []
+}
+
+export async function getCorrectionRequests(filters?: {
+  status?: string
+  teacherId?: string
+}) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  let query = admin
+    .from('attendance_correction_requests')
+    .select('*, teacher:teachers(full_name, email), session:attendance_sessions(*, room:rooms(name), center:centers(name))')
+    .order('created_at', { ascending: false })
+
+  if (filters?.status) query = query.eq('status', filters.status)
+  if (filters?.teacherId) query = query.eq('teacher_id', filters.teacherId)
+
+  const { data } = await query.limit(200)
+  return (data || []) as AttendanceCorrectionRequest[]
+}
+
+export async function getPendingCorrectionRequestsCount() {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return 0
+
+  const admin = createAdminClient()
+  const { count } = await admin
+    .from('attendance_correction_requests')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'pending')
+
+  return count || 0
+}
+
+export async function reviewCorrectionRequest(
+  requestId: string,
+  status: 'approved' | 'rejected',
+  adminNotes?: string
+) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('attendance_correction_requests')
+    .update({
+      status,
+      admin_notes: adminNotes || null,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq('id', requestId)
+    .eq('status', 'pending')
+
+  if (error) return { error: error.message }
+  return { success: true }
 }
 
 // ─── ADMIN - REPORTS ──────────────────────────────────────────────────────────

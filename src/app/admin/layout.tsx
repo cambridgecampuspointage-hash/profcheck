@@ -1,5 +1,3 @@
-'use client'
-
 import {
   BarChart3,
   ClipboardCheck,
@@ -11,6 +9,7 @@ import {
   Users,
 } from 'lucide-react'
 import { BrandShell, type BrandNavItem } from '@/components/brand-shell'
+import { getPendingCorrectionRequestsCount } from '@/lib/actions'
 
 const navItems: BrandNavItem[] = [
   { href: '/admin/dashboard', label: 'Tableau de bord', shortLabel: 'Dashboard', icon: <LayoutDashboard size={16} /> },
@@ -23,6 +22,17 @@ const navItems: BrandNavItem[] = [
   { href: '/admin/settings', label: 'Paramètres', shortLabel: 'Réglages', icon: <Settings size={16} /> },
 ]
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  return <BrandShell navItems={navItems} sectionLabel="Administration">{children}</BrandShell>
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  const pendingCount = await getPendingCorrectionRequestsCount()
+
+  return (
+    <BrandShell
+      navItems={navItems}
+      sectionLabel="Administration"
+      notificationCount={pendingCount}
+      notificationHref="/admin/attendance"
+    >
+      {children}
+    </BrandShell>
+  )
 }
