@@ -434,7 +434,7 @@ export async function validateAttendanceScan(
   const fallbackToleranceMeters = gpsAccuracyMeters > 0 ? 0 : 25
   const effectiveRadiusMeters = center.allowed_radius_meters + gpsToleranceMeters + fallbackToleranceMeters
 
-  if (distance > effectiveRadiusMeters) {
+  if (center.gps_verification_enabled !== false && distance > effectiveRadiusMeters) {
     await logAttempt(
       admin,
       teacher.id,
@@ -1329,12 +1329,37 @@ export async function createCenter(formData: {
   latitude: number
   longitude: number
   allowed_radius_meters?: number
+  gps_verification_enabled?: boolean
 }) {
   const { user, role } = await getSessionContext()
   if (!user || role !== 'admin') return { error: 'Accès refusé' }
 
   const admin = createAdminClient()
   const { error } = await admin.from('centers').insert(formData)
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function updateCenter(
+  centerId: string,
+  data: Partial<{
+    name: string
+    address: string
+    latitude: number
+    longitude: number
+    allowed_radius_meters: number
+    gps_verification_enabled: boolean
+  }>
+) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('centers')
+    .update(data)
+    .eq('id', centerId)
+
   if (error) return { error: error.message }
   return { success: true }
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getCenters, createCenter } from '@/lib/actions'
+import { getCenters, createCenter, updateCenter } from '@/lib/actions'
 import type { Center } from '@/lib/types'
 import { Settings as SettingsIcon, MapPin, Plus, X, Loader2 } from 'lucide-react'
 
@@ -9,6 +9,7 @@ export default function SettingsPage() {
   const [centers, setCenters] = useState<Center[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [togglingCenterId, setTogglingCenterId] = useState<string | null>(null)
 
   const fetchCenters = async () => {
     setLoading(true)
@@ -33,6 +34,21 @@ export default function SettingsPage() {
       active = false
     }
   }, [])
+
+  const toggleGpsVerification = async (center: Center) => {
+    setTogglingCenterId(center.id)
+    const result = await updateCenter(center.id, {
+      gps_verification_enabled: !center.gps_verification_enabled,
+    })
+    setTogglingCenterId(null)
+
+    if (result.error) {
+      window.alert(result.error)
+      return
+    }
+
+    void fetchCenters()
+  }
 
   return (
     <div>
@@ -71,6 +87,18 @@ export default function SettingsPage() {
                   <span>📍 {center.latitude?.toFixed(6)}, {center.longitude?.toFixed(6)}</span>
                   <span>📏 Rayon: {center.allowed_radius_meters}m</span>
                 </div>
+                <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.8125rem', color: center.gps_verification_enabled ? '#0f766e' : '#b45309', fontWeight: 700 }}>
+                    GPS {center.gps_verification_enabled ? 'activé' : 'désactivé'}
+                  </span>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => toggleGpsVerification(center)}
+                    disabled={togglingCenterId === center.id}
+                  >
+                    {togglingCenterId === center.id ? <><div className="spinner" /> Mise à jour...</> : center.gps_verification_enabled ? 'Désactiver le GPS' : 'Activer le GPS'}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -106,6 +134,7 @@ function CenterModalInline({ onClose, onSaved }: { onClose: () => void; onSaved:
   const [latitude, setLatitude] = useState('')
   const [longitude, setLongitude] = useState('')
   const [radius, setRadius] = useState('80')
+  const [gpsVerificationEnabled, setGpsVerificationEnabled] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -118,6 +147,7 @@ function CenterModalInline({ onClose, onSaved }: { onClose: () => void; onSaved:
       latitude: Number(latitude),
       longitude: Number(longitude),
       allowed_radius_meters: Number(radius),
+      gps_verification_enabled: gpsVerificationEnabled,
     })
     if (res.error) { setError(res.error); setSaving(false); return }
     onSaved()
@@ -162,6 +192,14 @@ function CenterModalInline({ onClose, onSaved }: { onClose: () => void; onSaved:
             <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Rayon (mètres)</label>
             <input className="input" type="number" value={radius} onChange={(e) => setRadius(e.target.value)} />
           </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.875rem', color: '#374151' }}>
+            <input
+              type="checkbox"
+              checked={gpsVerificationEnabled}
+              onChange={(e) => setGpsVerificationEnabled(e.target.checked)}
+            />
+            Activer la vérification GPS pour ce centre
+          </label>
           <button className="btn btn-primary" type="submit" disabled={saving} style={{ width: '100%' }}>
             {saving ? <><div className="spinner" /> Enregistrement...</> : 'Créer le centre'}
           </button>

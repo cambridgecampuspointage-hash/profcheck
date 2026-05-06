@@ -39,6 +39,7 @@ export interface Center {
   latitude: number
   longitude: number
   allowed_radius_meters: number
+  gps_verification_enabled: boolean
   created_at: string
 }
 
