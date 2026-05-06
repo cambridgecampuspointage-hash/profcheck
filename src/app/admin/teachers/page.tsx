@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import {
   createReceptionUser,
   createTeacher,
+  deleteReceptionUser,
   deleteTeacher,
   getTeacherBadgeSummaries,
   getReceptionUsers,
@@ -33,6 +34,7 @@ export default function TeachersPage() {
   const [editingReception, setEditingReception] = useState<ReceptionUser | null>(null)
   const [modalRole, setModalRole] = useState<'teacher' | 'reception'>('teacher')
   const [deletingTeacherId, setDeletingTeacherId] = useState<string | null>(null)
+  const [deletingReceptionId, setDeletingReceptionId] = useState<string | null>(null)
   const [resettingId, setResettingId] = useState<string | null>(null)
   const [resetPasswordInfo, setResetPasswordInfo] = useState<{ name: string; password: string } | null>(null)
 
@@ -133,6 +135,26 @@ export default function TeachersPage() {
       name: result.fullName || profile.full_name || 'Réceptionniste',
       password: result.tempPassword,
     })
+  }
+
+  const handleDeleteReception = async (profile: ReceptionUser) => {
+    const profileName = profile.full_name || profile.email || 'ce réceptionniste'
+    const confirmation = window.prompt(
+      `Pour supprimer définitivement ${profileName}, tapez SUPPRIMER`
+    )
+
+    if (confirmation !== 'SUPPRIMER') return
+
+    setDeletingReceptionId(profile.id)
+    const result = await deleteReceptionUser(profile.id)
+    setDeletingReceptionId(null)
+
+    if (result.error) {
+      window.alert(result.error)
+      return
+    }
+
+    void fetchData()
   }
 
   return (
@@ -340,6 +362,14 @@ export default function TeachersPage() {
                               title={profile.status === 'active' ? 'Désactiver' : 'Réactiver'}
                             >
                               {profile.status === 'active' ? <UserX size={15} /> : <UserCheck size={15} />}
+                            </button>
+                            <button
+                              className="brand-staff-icon-btn danger"
+                              disabled={deletingReceptionId === profile.id}
+                              onClick={() => handleDeleteReception(profile)}
+                              title="Supprimer définitivement"
+                            >
+                              {deletingReceptionId === profile.id ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={15} />}
                             </button>
                           </div>
                         </td>

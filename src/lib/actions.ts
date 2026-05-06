@@ -1245,6 +1245,28 @@ export async function resetReceptionPassword(profileId: string) {
   }
 }
 
+export async function deleteReceptionUser(profileId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { data: profile, error: profileError } = await admin
+    .from('profiles')
+    .select('id')
+    .eq('id', profileId)
+    .eq('role', 'reception')
+    .single()
+
+  if (profileError || !profile) {
+    return { error: 'Réceptionniste introuvable' }
+  }
+
+  const { error: deleteAuthError } = await admin.auth.admin.deleteUser(profile.id)
+  if (deleteAuthError) return { error: deleteAuthError.message }
+
+  return { success: true }
+}
+
 // ─── ADMIN - ROOMS MANAGEMENT ────────────────────────────────────────────────
 
 export async function getRooms() {
