@@ -30,6 +30,10 @@ const CREAM: [number, number, number] = [250, 248, 243]
 const GRAY: [number, number, number] = [96, 104, 120]
 const BORDER: [number, number, number] = [226, 220, 208]
 
+function colorTuple(color: readonly [number, number, number]): [number, number, number] {
+  return [color[0], color[1], color[2]]
+}
+
 function frDate(value: string): string {
   if (!value) return '-'
   const date = new Date(value)
@@ -272,17 +276,17 @@ export async function generateTeacherReportPdf(data: TeacherReportData): Promise
       fontSize: 8,
       cellPadding: 2.6,
       textColor: [60, 55, 50],
-      lineColor: BORDER,
+      lineColor: colorTuple(BORDER),
       lineWidth: 0.2,
     },
     headStyles: {
-      fillColor: NAVY,
-      textColor: WHITE,
+      fillColor: colorTuple(NAVY),
+      textColor: colorTuple(WHITE),
       fontStyle: 'bold',
     },
     footStyles: {
       fillColor: [246, 241, 232],
-      textColor: NAVY,
+      textColor: colorTuple(NAVY),
       fontStyle: 'bold',
     },
     alternateRowStyles: {
