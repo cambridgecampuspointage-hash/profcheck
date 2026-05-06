@@ -16,6 +16,8 @@ export interface Teacher {
   phone: string | null
   languages: string[] | null
   hourly_rate: number
+  hourly_rate_short: number
+  hourly_rate_long: number
   status: string
   created_at: string
 }
@@ -68,6 +70,11 @@ export interface AttendanceSession {
   started_at: string
   ended_at: string | null
   duration_minutes: number | null
+  planned_duration_minutes: number | null
+  session_type: 'standard' | 'one_to_one'
+  applied_hourly_rate: number | null
+  payable_amount: number | null
+  signature_data_url: string | null
   start_latitude: number
   start_longitude: number
   end_latitude: number | null
@@ -143,6 +150,9 @@ export interface ScanRequest {
   action: 'start' | 'end'
   latitude: number
   longitude: number
+  planned_duration_minutes?: number
+  session_type?: 'standard' | 'one_to_one'
+  signature_data_url?: string
 }
 
 export interface ScanResponse {

@@ -5,6 +5,7 @@ import { BrowserQRCodeReader } from '@zxing/browser'
 import { resolveAttendanceCode, validateAttendanceScan } from '@/lib/actions'
 import { getCurrentPosition, getGeoErrorMessage } from '@/lib/gps'
 import type { QrPayload } from '@/lib/types'
+import { SignaturePad } from '@/components/SignaturePad'
 import {
   Camera,
   MapPin,
@@ -15,10 +16,12 @@ import {
   Square,
   ArrowLeft,
   Keyboard,
+  PenTool,
+  Clock3,
 } from 'lucide-react'
 import Link from 'next/link'
 
-type ScanStep = 'scanning' | 'choose-action' | 'processing' | 'result'
+type ScanStep = 'scanning' | 'choose-action' | 'start-setup' | 'processing' | 'result'
 
 export default function ScanPage() {
   const [step, setStep] = useState<ScanStep>('scanning')
@@ -30,6 +33,11 @@ export default function ScanPage() {
   const [manualCode, setManualCode] = useState('')
   const [manualError, setManualError] = useState('')
   const [manualLoading, setManualLoading] = useState(false)
+  const [plannedDuration, setPlannedDuration] = useState<60 | 90 | 120 | 180>(60)
+  const [sessionType, setSessionType] = useState<'standard' | 'one_to_one'>('standard')
+  const [signatureDataUrl, setSignatureDataUrl] = useState('')
+  const [signatureEmpty, setSignatureEmpty] = useState(true)
+  const [startSetupError, setStartSetupError] = useState('')
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -129,6 +137,14 @@ export default function ScanPage() {
 
   const handleAction = async (selectedAction: 'start' | 'end') => {
     if (!qrPayload) return
+
+    if (selectedAction === 'start') {
+      setAction('start')
+      setStartSetupError('')
+      setStep('start-setup')
+      return
+    }
+
     setAction(selectedAction)
     setStep('processing')
 
@@ -141,6 +157,44 @@ export default function ScanPage() {
         selectedAction,
         position.coords.latitude,
         position.coords.longitude
+      )
+      setResult(res)
+      setStep('result')
+    } catch (error) {
+      if (error instanceof GeolocationPositionError) {
+        setResult({ success: false, message: getGeoErrorMessage(error) })
+      } else {
+        setResult({ success: false, message: 'Localisation obligatoire. Veuillez autoriser l\'accès GPS.' })
+      }
+      setStep('result')
+    }
+  }
+
+  const handleStartSession = async () => {
+    if (!qrPayload) return
+    if (signatureEmpty || !signatureDataUrl) {
+      setStartSetupError('La signature est obligatoire avant de commencer.')
+      return
+    }
+
+    setStartSetupError('')
+    setAction('start')
+    setStep('processing')
+
+    try {
+      const position = await getCurrentPosition()
+      const res = await validateAttendanceScan(
+        qrPayload.token,
+        qrPayload.center_id,
+        qrPayload.room_id,
+        'start',
+        position.coords.latitude,
+        position.coords.longitude,
+        {
+          plannedDurationMinutes: plannedDuration,
+          sessionType,
+          signatureDataUrl,
+        }
       )
       setResult(res)
       setStep('result')
@@ -180,13 +234,18 @@ export default function ScanPage() {
     setCameraError('')
     setManualCode('')
     setManualError('')
+    setPlannedDuration(60)
+    setSessionType('standard')
+    setSignatureDataUrl('')
+    setSignatureEmpty(true)
+    setStartSetupError('')
     setScanAttempt((current) => current + 1)
     setStep('scanning')
   }
 
   return (
     <div className="page-enter">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+      <div className="scan-page-header" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
         <Link href="/teacher/dashboard" style={{ color: '#64748b' }}>
           <ArrowLeft size={20} />
         </Link>
@@ -262,7 +321,7 @@ export default function ScanPage() {
             <p style={{ color: '#64748b', fontSize: '0.875rem', marginBottom: '1rem' }}>
               Saisissez le code manuel à 6 chiffres affiché avec le QR code.
             </p>
-            <form onSubmit={handleManualCodeSubmit} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <form onSubmit={handleManualCodeSubmit} className="scan-manual-form" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
               <input
                 className="input"
                 inputMode="numeric"
@@ -323,6 +382,118 @@ export default function ScanPage() {
             <button className="btn btn-secondary" onClick={resetScan}>
               Scanner un autre QR code
             </button>
+          </div>
+        </div>
+      )}
+
+      {step === 'start-setup' && (
+        <div className="scan-start-layout" style={{ display: 'grid', gap: '1rem' }}>
+          <div className="card scan-start-card">
+            <div className="scan-start-head" style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '1rem' }}>
+              <Clock3 size={20} color="#6366f1" />
+              <div>
+                <h2 className="scan-start-title" style={{ fontSize: '1.05rem', fontWeight: 700, color: '#1b2d5b' }}>Préparer le démarrage</h2>
+                <p className="scan-start-copy" style={{ color: '#64748b', fontSize: '0.87rem', marginTop: '0.15rem' }}>
+                  Choisissez la durée prévue, le type de séance puis signez avant de commencer.
+                </p>
+              </div>
+            </div>
+
+            <div className="scan-section" style={{ marginBottom: '1rem' }}>
+              <div className="scan-section-title" style={{ fontWeight: 700, color: '#1b2d5b', marginBottom: '0.65rem' }}>Durée prévue</div>
+              <div className="scan-option-grid scan-option-grid-three" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: '0.75rem' }}>
+                {[
+                  { value: 60 as const, label: '1h', hint: 'One-to-one ou courte séance' },
+                  { value: 90 as const, label: '1h30', hint: 'Durée standard' },
+                  { value: 120 as const, label: '2h', hint: 'Séance longue' },
+                  { value: 180 as const, label: '3h', hint: 'Bloc intensif' },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className="btn scan-option-btn"
+                    onClick={() => setPlannedDuration(option.value)}
+                    style={{
+                      border: plannedDuration === option.value ? '1px solid #6366f1' : '1px solid #e2e8f0',
+                      background: plannedDuration === option.value ? '#eef2ff' : '#fff',
+                      color: '#1b2d5b',
+                      flexDirection: 'column',
+                      alignItems: 'flex-start',
+                      padding: '0.95rem 1rem',
+                    }}
+                  >
+                    <span className="scan-option-label" style={{ fontSize: '1rem', fontWeight: 800 }}>{option.label}</span>
+                    <span className="scan-option-hint" style={{ fontSize: '0.76rem', color: '#64748b', fontWeight: 500 }}>{option.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="scan-section" style={{ marginBottom: '1rem' }}>
+              <div className="scan-section-title" style={{ fontWeight: 700, color: '#1b2d5b', marginBottom: '0.65rem' }}>Type de séance</div>
+              <div className="scan-option-grid scan-option-grid-two" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn scan-option-btn"
+                  onClick={() => setSessionType('standard')}
+                  style={{
+                    border: sessionType === 'standard' ? '1px solid #6366f1' : '1px solid #e2e8f0',
+                    background: sessionType === 'standard' ? '#eef2ff' : '#fff',
+                    color: '#1b2d5b',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    padding: '0.95rem 1rem',
+                  }}
+                >
+                  <span className="scan-option-label" style={{ fontSize: '0.98rem', fontWeight: 800 }}>Cours normal</span>
+                  <span className="scan-option-hint" style={{ fontSize: '0.78rem', color: '#64748b' }}>Taux horaire normal</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn scan-option-btn"
+                  onClick={() => setSessionType('one_to_one')}
+                  style={{
+                    border: sessionType === 'one_to_one' ? '1px solid #6366f1' : '1px solid #e2e8f0',
+                    background: sessionType === 'one_to_one' ? '#eef2ff' : '#fff',
+                    color: '#1b2d5b',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    padding: '0.95rem 1rem',
+                  }}
+                >
+                  <span className="scan-option-label" style={{ fontSize: '0.98rem', fontWeight: 800 }}>One-to-one</span>
+                  <span className="scan-option-hint" style={{ fontSize: '0.78rem', color: '#64748b' }}>Taux majoré × 1,5</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="scan-signature-block">
+              <div className="scan-signature-head" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.75rem' }}>
+                <PenTool size={18} color="#6366f1" />
+                <div className="scan-section-title" style={{ fontWeight: 700, color: '#1b2d5b' }}>Signature du professeur</div>
+              </div>
+              <SignaturePad
+                onChange={(value, isEmpty) => {
+                  setSignatureDataUrl(value)
+                  setSignatureEmpty(isEmpty)
+                  if (!isEmpty && startSetupError) setStartSetupError('')
+                }}
+              />
+            </div>
+
+            {startSetupError ? (
+              <div style={{ marginTop: '1rem', color: '#b91c1c', fontSize: '0.85rem' }}>{startSetupError}</div>
+            ) : null}
+
+            <div className="scan-start-actions" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
+              <button className="btn btn-success btn-lg" onClick={handleStartSession}>
+                <Play size={20} />
+                Signer et commencer le cours
+              </button>
+              <button className="btn btn-secondary" onClick={() => setStep('choose-action')}>
+                Retour
+              </button>
+            </div>
           </div>
         </div>
       )}

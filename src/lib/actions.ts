@@ -1,6 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { matchAttendanceToPlanning } from '@/lib/planning/matchSessionToPlanning'
 import { createClient } from '@/lib/supabase/server'
 import { calculateDistanceMeters } from '@/lib/gps'
 import { endOfDateFilterExclusive, getDateRanges, startOfDateFilter } from '@/lib/utils'
@@ -16,6 +17,7 @@ import type {
   TeacherBadge,
   TeacherBadgeSummary,
 } from '@/lib/types'
+import type { PlannedSession } from '@/types/planning'
 import type { TeacherReportData } from '@/lib/pdf/generateTeacherReport'
 
 const DEMO_MODE_ENABLED = process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === 'true'
@@ -28,10 +30,80 @@ type TeacherBadgeMetrics = {
   correctionRequestsLast30Days: number
 }
 
+type TeacherRateSource = {
+  hourly_rate?: number | null
+  hourly_rate_short?: number | null
+  hourly_rate_long?: number | null
+}
+
+function getAppliedHourlyRate(teacher: TeacherRateSource, plannedDurationMinutes: number) {
+  const shortRate = Number(teacher.hourly_rate_short ?? teacher.hourly_rate ?? 0)
+  const longRate = Number(teacher.hourly_rate_long ?? teacher.hourly_rate ?? 0)
+
+  if ([60, 120].includes(plannedDurationMinutes)) {
+    return Math.round(shortRate * 100) / 100
+  }
+
+  if ([90, 180].includes(plannedDurationMinutes)) {
+    return Math.round(longRate * 100) / 100
+  }
+
+  return Math.round(Number(teacher.hourly_rate ?? shortRate) * 100) / 100
+}
+
+function getPayableMinutes(session: {
+  planned_duration_minutes?: number | null
+  duration_minutes?: number | null
+}) {
+  return session.planned_duration_minutes || session.duration_minutes || 0
+}
+
+function roundPayableAmount(value: number) {
+  const rounded = Math.round(value * 100) / 100
+  const nearestWhole = Math.round(rounded)
+
+  if (Math.abs(rounded - nearestWhole) <= 0.02) {
+    return nearestWhole
+  }
+
+  return rounded
+}
+
+function getPayableAmount(session: {
+  payable_amount?: number | null
+  planned_duration_minutes?: number | null
+  duration_minutes?: number | null
+  applied_hourly_rate?: number | null
+}) {
+  if (typeof session.payable_amount === 'number' && session.payable_amount > 0) {
+    return session.payable_amount
+  }
+
+  const payableMinutes = getPayableMinutes(session)
+  const hourlyRate = session.applied_hourly_rate || 0
+  return roundPayableAmount((payableMinutes / 60) * hourlyRate)
+}
+
 function generateAccessCode(token: string): string {
   const hash = crypto.createHash('sha256').update(token).digest()
   const numeric = hash.readUInt32BE(0) % 1000000
   return numeric.toString().padStart(6, '0')
+}
+
+function formatDateKey(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function getLocalWeekStart(date = new Date()) {
+  const copy = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const day = copy.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  copy.setDate(copy.getDate() + diff)
+  copy.setHours(0, 0, 0, 0)
+  return copy
 }
 
 function buildTeacherBadges(metrics: TeacherBadgeMetrics): TeacherBadge[] {
@@ -120,7 +192,7 @@ async function getTeacherBadgeMetrics(teacherId: string) {
       .eq('status', 'completed'),
     admin
       .from('attendance_sessions')
-      .select('duration_minutes')
+      .select('duration_minutes, planned_duration_minutes')
       .eq('teacher_id', teacherId)
       .eq('status', 'completed')
       .gte('started_at', startOfMonth),
@@ -143,7 +215,7 @@ async function getTeacherBadgeMetrics(teacherId: string) {
       .gte('created_at', last30Days),
   ])
 
-  const monthMinutes = (monthSessionsRes.data || []).reduce((sum, session) => sum + (session.duration_minutes || 0), 0)
+  const monthMinutes = (monthSessionsRes.data || []).reduce((sum, session) => sum + getPayableMinutes(session), 0)
 
   return {
     completedSessions: completedSessionsRes.count || 0,
@@ -295,7 +367,12 @@ export async function validateAttendanceScan(
   roomId: string,
   action: 'start' | 'end',
   latitude: number,
-  longitude: number
+  longitude: number,
+  options?: {
+    plannedDurationMinutes?: number
+    sessionType?: 'standard' | 'one_to_one'
+    signatureDataUrl?: string
+  }
 ): Promise<ScanResponse> {
   const supabase = await createClient()
   const admin = createAdminClient()
@@ -357,6 +434,21 @@ export async function validateAttendanceScan(
 
   // 6. Handle START action
   if (action === 'start') {
+    const plannedDurationMinutes = options?.plannedDurationMinutes
+    const sessionType = options?.sessionType || 'standard'
+    const signatureDataUrl = options?.signatureDataUrl?.trim()
+    const startedAt = new Date()
+
+    if (![60, 90, 120, 180].includes(plannedDurationMinutes || 0)) {
+      await logAttempt(admin, teacher.id, centerId, roomId, token, action, latitude, longitude, distance, 'rejected', 'Durée planifiée invalide')
+      return { success: false, message: 'Veuillez choisir une durée planifiée valide.' }
+    }
+
+    if (!signatureDataUrl) {
+      await logAttempt(admin, teacher.id, centerId, roomId, token, action, latitude, longitude, distance, 'rejected', 'Signature manquante')
+      return { success: false, message: 'La signature est obligatoire pour démarrer le cours.' }
+    }
+
     // Check for existing active session
     const { data: activeSession } = await admin
       .from('attendance_sessions')
@@ -371,22 +463,45 @@ export async function validateAttendanceScan(
     }
 
     // Create new session
+    const appliedHourlyRate = getAppliedHourlyRate(teacher, plannedDurationMinutes || 0)
+    const payableAmount = roundPayableAmount(((plannedDurationMinutes || 0) / 60) * appliedHourlyRate)
+
+    const planningMatch = await matchAttendanceToPlanning(teacher.id, startedAt, admin).catch(() => ({
+      matched: false as const,
+      plannedSession: null,
+    }))
+
     const { data: session, error } = await admin
       .from('attendance_sessions')
       .insert({
         teacher_id: teacher.id,
         center_id: centerId,
         room_id: roomId,
-        started_at: new Date().toISOString(),
+        started_at: startedAt.toISOString(),
         start_latitude: latitude,
         start_longitude: longitude,
         start_status: 'accepted',
+        planned_duration_minutes: plannedDurationMinutes,
+        session_type: sessionType,
+        applied_hourly_rate: appliedHourlyRate,
+        payable_amount: payableAmount,
+        signature_data_url: signatureDataUrl,
         status: 'active',
       })
       .select('*, room:rooms(*), center:centers(*)')
       .single()
 
     if (error) return { success: false, message: 'Erreur lors de la création de la session.' }
+
+    if (planningMatch.matched) {
+      await admin
+        .from('planned_sessions')
+        .update({
+          linked_session_id: session.id,
+          status: 'in_progress',
+        })
+        .eq('id', planningMatch.plannedSession.id)
+    }
 
     await logAttempt(admin, teacher.id, centerId, roomId, token, action, latitude, longitude, distance, 'accepted', null)
     return { success: true, message: 'Cours commencé avec succès !', session }
@@ -425,6 +540,14 @@ export async function validateAttendanceScan(
       .single()
 
     if (error) return { success: false, message: 'Erreur lors de la fin de session.' }
+
+    await admin
+      .from('planned_sessions')
+      .update({
+        status: 'completed',
+      })
+      .eq('linked_session_id', activeSession.id)
+      .in('status', ['scheduled', 'in_progress'])
 
     await logAttempt(admin, teacher.id, centerId, roomId, token, action, latitude, longitude, distance, 'accepted', null)
     return { success: true, message: 'Cours terminé avec succès !', session }
@@ -474,32 +597,32 @@ export async function getTeacherStats(): Promise<TeacherStats | null> {
   // Today hours
   const { data: todaySessions } = await admin
     .from('attendance_sessions')
-    .select('duration_minutes')
+    .select('duration_minutes, planned_duration_minutes')
     .eq('teacher_id', teacher.id)
     .eq('status', 'completed')
     .gte('started_at', startOfDay)
 
-  const todayMinutes = todaySessions?.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) || 0
+  const todayMinutes = todaySessions?.reduce((sum, s) => sum + getPayableMinutes(s), 0) || 0
 
   // Week hours
   const { data: weekSessions } = await admin
     .from('attendance_sessions')
-    .select('duration_minutes')
+    .select('duration_minutes, planned_duration_minutes')
     .eq('teacher_id', teacher.id)
     .eq('status', 'completed')
     .gte('started_at', startOfWeek)
 
-  const weekMinutes = weekSessions?.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) || 0
+  const weekMinutes = weekSessions?.reduce((sum, s) => sum + getPayableMinutes(s), 0) || 0
 
   // Month hours
   const { data: monthSessions } = await admin
     .from('attendance_sessions')
-    .select('duration_minutes')
+    .select('duration_minutes, planned_duration_minutes')
     .eq('teacher_id', teacher.id)
     .eq('status', 'completed')
     .gte('started_at', startOfMonth)
 
-  const monthMinutes = monthSessions?.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) || 0
+  const monthMinutes = monthSessions?.reduce((sum, s) => sum + getPayableMinutes(s), 0) || 0
 
   return {
     todayHours: todayMinutes / 60,
@@ -556,6 +679,54 @@ export async function getTeacherHistory() {
   return data || []
 }
 
+export async function getTeacherPlannedSessions(): Promise<PlannedSession[]> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const admin = createAdminClient()
+
+  const { data: teacher } = await admin
+    .from('teachers')
+    .select('id')
+    .eq('user_id', user.id)
+    .single()
+
+  if (!teacher) return []
+
+  const weekStart = getLocalWeekStart()
+  const weekEnd = new Date(weekStart)
+  weekEnd.setDate(weekStart.getDate() + 5)
+
+  const { data, error } = await admin
+    .from('planned_sessions')
+    .select(`
+      *,
+      teacher:teachers(full_name),
+      room:rooms(name),
+      campus:centers(name),
+      linked_session:attendance_sessions(started_at, ended_at, duration_minutes)
+    `)
+    .eq('teacher_id', teacher.id)
+    .gte('scheduled_date', formatDateKey(weekStart))
+    .lte('scheduled_date', formatDateKey(weekEnd))
+    .order('scheduled_date')
+    .order('start_time')
+
+  if (error) return []
+
+  return ((data || []).map((session) => ({
+    ...session,
+    linked_session: session.linked_session
+      ? {
+          start_time: (session.linked_session as { started_at?: string }).started_at || null,
+          end_time: (session.linked_session as { ended_at?: string }).ended_at || null,
+          duration_minutes: (session.linked_session as { duration_minutes?: number | null }).duration_minutes || null,
+        }
+      : null,
+  })) as PlannedSession[])
+}
+
 export async function getMyTeacherReportData(dateFrom: string, dateTo: string): Promise<{ data?: TeacherReportData; error?: string }> {
   const { user, role } = await getSessionContext()
   if (!user || role !== 'teacher') return { error: 'Accès refusé' }
@@ -563,7 +734,7 @@ export async function getMyTeacherReportData(dateFrom: string, dateTo: string): 
   const admin = createAdminClient()
   const { data: teacher } = await admin
     .from('teachers')
-    .select('id, full_name, email, hourly_rate')
+    .select('id, full_name, email, hourly_rate, hourly_rate_short, hourly_rate_long')
     .eq('user_id', user.id)
     .single()
 
@@ -571,7 +742,7 @@ export async function getMyTeacherReportData(dateFrom: string, dateTo: string): 
 
   const { data: sessions, error } = await admin
     .from('attendance_sessions')
-    .select('started_at, ended_at, duration_minutes, status, room:rooms(name)')
+    .select('started_at, ended_at, duration_minutes, planned_duration_minutes, status, session_type, applied_hourly_rate, payable_amount, room:rooms(name)')
     .eq('teacher_id', teacher.id)
     .eq('status', 'completed')
     .gte('started_at', startOfDateFilter(dateFrom))
@@ -589,17 +760,17 @@ export async function getMyTeacherReportData(dateFrom: string, dateTo: string): 
       date: session.started_at,
       start_time: Number.isNaN(startedAt.getTime()) ? '—' : startedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
       end_time: !endedAt || Number.isNaN(endedAt.getTime()) ? '—' : endedAt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-      duration_minutes: session.duration_minutes || 0,
+      duration_minutes: getPayableMinutes(session),
       room: roomName || undefined,
-      subject: undefined,
+      subject: session.session_type === 'one_to_one' ? 'One-to-one' : 'Cours normal',
       status: 'validé' as const,
     }
   })
 
   const totalMinutes = safeSessions.reduce((sum, session) => sum + session.duration_minutes, 0)
   const totalHours = totalMinutes / 60
-  const hourlyRate = teacher.hourly_rate || 0
-  const estimatedPayment = totalHours * hourlyRate
+  const estimatedPayment = (sessions || []).reduce((sum, session) => sum + getPayableAmount(session), 0)
+  const hourlyRate = totalHours > 0 ? estimatedPayment / totalHours : teacher.hourly_rate || 0
 
   return {
     data: {
@@ -608,7 +779,7 @@ export async function getMyTeacherReportData(dateFrom: string, dateTo: string): 
       teacher_id: teacher.id,
       period_from: dateFrom,
       period_to: dateTo,
-      hourly_rate: hourlyRate,
+      hourly_rate: Math.round(hourlyRate * 100) / 100,
       total_sessions: safeSessions.length,
       total_hours: Math.round(totalHours * 100) / 100,
       estimated_payment: Math.round(estimatedPayment * 100) / 100,
@@ -727,29 +898,29 @@ export async function getAdminStats(): Promise<AdminStats | null> {
   // Today hours
   const { data: todaySessions } = await admin
     .from('attendance_sessions')
-    .select('duration_minutes')
+    .select('duration_minutes, planned_duration_minutes')
     .eq('status', 'completed')
     .gte('started_at', startOfDay)
 
-  const totalHoursToday = (todaySessions?.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) || 0) / 60
+  const totalHoursToday = (todaySessions?.reduce((sum, s) => sum + getPayableMinutes(s), 0) || 0) / 60
 
   // Week hours
   const { data: weekSessions } = await admin
     .from('attendance_sessions')
-    .select('duration_minutes')
+    .select('duration_minutes, planned_duration_minutes')
     .eq('status', 'completed')
     .gte('started_at', startOfWeek)
 
-  const totalHoursWeek = (weekSessions?.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) || 0) / 60
+  const totalHoursWeek = (weekSessions?.reduce((sum, s) => sum + getPayableMinutes(s), 0) || 0) / 60
 
   // Month hours
   const { data: monthSessions } = await admin
     .from('attendance_sessions')
-    .select('duration_minutes')
+    .select('duration_minutes, planned_duration_minutes')
     .eq('status', 'completed')
     .gte('started_at', startOfMonth)
 
-  const totalHoursMonth = (monthSessions?.reduce((sum, s) => sum + (s.duration_minutes || 0), 0) || 0) / 60
+  const totalHoursMonth = (monthSessions?.reduce((sum, s) => sum + getPayableMinutes(s), 0) || 0) / 60
 
   // Recent attendance
   const { data: recentAttendance } = await admin
@@ -818,6 +989,8 @@ export async function createTeacher(formData: {
   phone?: string
   languages?: string[]
   hourly_rate?: number
+  hourly_rate_short?: number
+  hourly_rate_long?: number
 }) {
   const { user, role } = await getSessionContext()
   if (!user || role !== 'admin') return { error: 'Accès refusé' }
@@ -845,7 +1018,9 @@ export async function createTeacher(formData: {
       full_name: formData.full_name,
       phone: formData.phone || null,
       languages: formData.languages || [],
-      hourly_rate: formData.hourly_rate || 0,
+      hourly_rate: formData.hourly_rate_short || formData.hourly_rate || 0,
+      hourly_rate_short: formData.hourly_rate_short || formData.hourly_rate || 0,
+      hourly_rate_long: formData.hourly_rate_long || formData.hourly_rate || 0,
     })
     .eq('user_id', authUser.user.id)
 
@@ -861,6 +1036,8 @@ export async function updateTeacher(
     phone: string
     languages: string[]
     hourly_rate: number
+    hourly_rate_short: number
+    hourly_rate_long: number
     status: string
   }>
 ) {
@@ -868,13 +1045,49 @@ export async function updateTeacher(
   if (!user || role !== 'admin') return { error: 'Accès refusé' }
 
   const admin = createAdminClient()
+  const payload = {
+    ...data,
+    hourly_rate: typeof data.hourly_rate_short === 'number'
+      ? data.hourly_rate_short
+      : data.hourly_rate,
+  }
+
   const { error } = await admin
     .from('teachers')
-    .update(data)
+    .update(payload)
     .eq('id', teacherId)
 
   if (error) return { error: error.message }
   return { success: true }
+}
+
+export async function resetTeacherPassword(teacherId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { data: teacher, error: teacherError } = await admin
+    .from('teachers')
+    .select('id, full_name, user_id')
+    .eq('id', teacherId)
+    .single()
+
+  if (teacherError || !teacher?.user_id) {
+    return { error: 'Professeur introuvable' }
+  }
+
+  const tempPassword = crypto.randomBytes(16).toString('hex')
+  const { error: resetError } = await admin.auth.admin.updateUserById(teacher.user_id, {
+    password: tempPassword,
+  })
+
+  if (resetError) return { error: resetError.message }
+
+  return {
+    success: true,
+    tempPassword,
+    fullName: teacher.full_name,
+  }
 }
 
 export async function deleteTeacher(teacherId: string) {
@@ -978,6 +1191,36 @@ export async function updateReceptionUser(
 
   if (error) return { error: error.message }
   return { success: true }
+}
+
+export async function resetReceptionPassword(profileId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { data: profile, error: profileError } = await admin
+    .from('profiles')
+    .select('id, full_name, role')
+    .eq('id', profileId)
+    .eq('role', 'reception')
+    .single()
+
+  if (profileError || !profile) {
+    return { error: 'Réceptionniste introuvable' }
+  }
+
+  const tempPassword = crypto.randomBytes(16).toString('hex')
+  const { error: resetError } = await admin.auth.admin.updateUserById(profile.id, {
+    password: tempPassword,
+  })
+
+  if (resetError) return { error: resetError.message }
+
+  return {
+    success: true,
+    tempPassword,
+    fullName: profile.full_name,
+  }
 }
 
 // ─── ADMIN - ROOMS MANAGEMENT ────────────────────────────────────────────────
@@ -1186,7 +1429,7 @@ export async function getTeacherReports(filters: {
 
   let query = admin
     .from('attendance_sessions')
-    .select('teacher_id, duration_minutes, teacher:teachers(full_name, hourly_rate)')
+    .select('teacher_id, duration_minutes, planned_duration_minutes, payable_amount, applied_hourly_rate, teacher:teachers(full_name, hourly_rate, hourly_rate_short, hourly_rate_long)')
     .eq('status', 'completed')
     .gte('started_at', startOfDateFilter(filters.dateFrom))
     .lt('started_at', endOfDateFilterExclusive(filters.dateTo))
@@ -1203,7 +1446,12 @@ export async function getTeacherReports(filters: {
   const teacherMap = new Map<string, TeacherReport>()
 
   for (const session of sessions) {
-    const teacherData = session.teacher as unknown as { full_name: string; hourly_rate: number }
+    const teacherData = session.teacher as unknown as {
+      full_name: string
+      hourly_rate: number
+      hourly_rate_short?: number
+      hourly_rate_long?: number
+    }
     const existing = teacherMap.get(session.teacher_id) || {
       teacher_id: session.teacher_id,
       teacher_name: teacherData?.full_name || 'Inconnu',
@@ -1214,7 +1462,8 @@ export async function getTeacherReports(filters: {
     }
 
     existing.total_sessions += 1
-    existing.total_hours += (session.duration_minutes || 0) / 60
+    existing.total_hours += getPayableMinutes(session) / 60
+    existing.estimated_payment += getPayableAmount(session)
 
     teacherMap.set(session.teacher_id, existing)
   }
@@ -1222,7 +1471,10 @@ export async function getTeacherReports(filters: {
   const reports = Array.from(teacherMap.values())
   reports.forEach((r) => {
     r.total_hours = Math.round(r.total_hours * 100) / 100
-    r.estimated_payment = Math.round(r.total_hours * r.hourly_rate * 100) / 100
+    r.estimated_payment = Math.round(r.estimated_payment * 100) / 100
+    r.hourly_rate = r.total_hours > 0
+      ? Math.round((r.estimated_payment / r.total_hours) * 100) / 100
+      : r.hourly_rate
   })
 
   return reports

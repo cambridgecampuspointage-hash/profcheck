@@ -34,6 +34,10 @@ export async function updateSession(request: NextRequest) {
   const demoRole = request.cookies.get('demo-role')?.value || 'admin'
   const { pathname } = request.nextUrl
 
+  if (pathname.startsWith('/api/alerts/')) {
+    return supabaseResponse
+  }
+
   // DEMO BYPASS
   if (isDemo) {
     if (pathname === '/login' || pathname === '/') {

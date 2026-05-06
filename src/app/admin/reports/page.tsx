@@ -6,6 +6,13 @@ import { buildPayrollCsv, downloadCsv, payrollFilename } from '@/lib/csv'
 import type { Teacher, TeacherReport } from '@/lib/types'
 import { ArrowDownAZ, BarChart3, Download, Loader2, Search } from 'lucide-react'
 
+function formatMad(value: number): string {
+  return `${value.toLocaleString('fr-MA', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} MAD`
+}
+
 export default function ReportsPage() {
   const [reports, setReports] = useState<TeacherReport[]>([])
   const [teachers, setTeachers] = useState<Teacher[]>([])
@@ -206,7 +213,7 @@ export default function ReportsPage() {
               <p style={{ color: '#64748b', fontSize: '0.8125rem' }}>Heures totales</p>
             </div>
             <div className="card" style={{ textAlign: 'center' }}>
-              <p style={{ fontSize: '2rem', fontWeight: 800, color: '#10b981' }}>{totalPayment.toFixed(2)}€</p>
+              <p style={{ fontSize: '2rem', fontWeight: 800, color: '#10b981' }}>{formatMad(totalPayment)}</p>
               <p style={{ color: '#64748b', fontSize: '0.8125rem' }}>Paiement total estimé</p>
             </div>
             <div className="card" style={{ textAlign: 'center' }}>
@@ -233,8 +240,8 @@ export default function ReportsPage() {
                     <td style={{ fontWeight: 600 }}>{r.teacher_name}</td>
                     <td>{r.total_sessions}</td>
                     <td>{r.total_hours.toFixed(1)}h</td>
-                    <td>{r.hourly_rate}€/h</td>
-                    <td style={{ fontWeight: 600, color: '#10b981' }}>{r.estimated_payment.toFixed(2)}€</td>
+                    <td>{formatMad(r.hourly_rate)} / h</td>
+                    <td style={{ fontWeight: 600, color: '#10b981' }}>{formatMad(r.estimated_payment)}</td>
                   </tr>
                 ))}
               </tbody>

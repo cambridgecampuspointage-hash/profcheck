@@ -1258,6 +1258,80 @@ body {
     padding: 0.875rem 1.5rem;
     width: 100%;
   }
+
+  .scan-page-header {
+    align-items: flex-start !important;
+  }
+
+  .scan-page-header h1 {
+    line-height: 1.25;
+  }
+
+  .scan-manual-form {
+    flex-direction: column;
+  }
+
+  .scan-manual-form .input,
+  .scan-manual-form .btn {
+    width: 100%;
+    min-width: 0 !important;
+  }
+
+  .scan-start-card {
+    padding: 1rem !important;
+  }
+
+  .scan-start-head {
+    align-items: flex-start !important;
+  }
+
+  .scan-start-title {
+    font-size: 0.98rem !important;
+    line-height: 1.25;
+  }
+
+  .scan-start-copy {
+    font-size: 0.8rem !important;
+    line-height: 1.45;
+  }
+
+  .scan-option-grid-three,
+  .scan-option-grid-two {
+    grid-template-columns: 1fr !important;
+  }
+
+  .scan-option-grid .btn {
+    width: 100%;
+    min-height: 72px;
+    padding: 0.8rem 0.9rem !important;
+    gap: 0.3rem;
+  }
+
+  .scan-option-label {
+    font-size: 0.95rem !important;
+    line-height: 1.2;
+  }
+
+  .scan-option-hint {
+    font-size: 0.74rem !important;
+    line-height: 1.35;
+    white-space: normal;
+    text-align: left;
+  }
+
+  .scan-start-actions .btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .scan-option-grid-three {
+    grid-template-columns: 1fr !important;
+  }
+
+  .scan-option-grid-two {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 /* RECEPTION DASHBOARD */

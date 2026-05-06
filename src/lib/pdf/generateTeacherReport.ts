@@ -23,12 +23,12 @@ export interface TeacherReportData {
   sessions: TeacherAttendanceRow[]
 }
 
-const NAVY = [27, 45, 91] as const
-const GOLD = [201, 168, 76] as const
-const WHITE = [255, 255, 255] as const
-const CREAM = [250, 248, 243] as const
-const GRAY = [96, 104, 120] as const
-const BORDER = [226, 220, 208] as const
+const NAVY: [number, number, number] = [27, 45, 91]
+const GOLD: [number, number, number] = [201, 168, 76]
+const WHITE: [number, number, number] = [255, 255, 255]
+const CREAM: [number, number, number] = [250, 248, 243]
+const GRAY: [number, number, number] = [96, 104, 120]
+const BORDER: [number, number, number] = [226, 220, 208]
 
 function frDate(value: string): string {
   if (!value) return '-'
@@ -56,11 +56,10 @@ function frNum(value: number, decimals = 2): string {
 }
 
 function frCurrency(value: number): string {
-  return value.toLocaleString('fr-FR', {
-    style: 'currency',
-    currency: 'EUR',
+  return `${value.toLocaleString('fr-MA', {
     minimumFractionDigits: 2,
-  })
+    maximumFractionDigits: 2,
+  })} MAD`
 }
 
 function minutesLabel(minutes: number): string {

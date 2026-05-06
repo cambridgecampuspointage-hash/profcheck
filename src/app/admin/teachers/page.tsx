@@ -8,11 +8,20 @@ import {
   getTeacherBadgeSummaries,
   getReceptionUsers,
   getTeachers,
+  resetReceptionPassword,
+  resetTeacherPassword,
   updateReceptionUser,
   updateTeacher,
 } from '@/lib/actions'
 import type { ReceptionUser, Teacher, TeacherBadgeSummary } from '@/lib/types'
-import { Edit2, Loader2, Plus, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react'
+import { Edit2, KeyRound, Loader2, Plus, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react'
+
+function formatTeacherRate(value?: number | null, fallback?: number | null) {
+  return Number(value ?? fallback ?? 0).toLocaleString('fr-MA', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+}
 
 export default function TeachersPage() {
   const [teachers, setTeachers] = useState<Teacher[]>([])
@@ -24,6 +33,8 @@ export default function TeachersPage() {
   const [editingReception, setEditingReception] = useState<ReceptionUser | null>(null)
   const [modalRole, setModalRole] = useState<'teacher' | 'reception'>('teacher')
   const [deletingTeacherId, setDeletingTeacherId] = useState<string | null>(null)
+  const [resettingId, setResettingId] = useState<string | null>(null)
+  const [resetPasswordInfo, setResetPasswordInfo] = useState<{ name: string; password: string } | null>(null)
 
   const fetchData = async () => {
     setLoading(true)
@@ -90,6 +101,38 @@ export default function TeachersPage() {
     }
 
     void fetchData()
+  }
+
+  const handleResetTeacherPassword = async (teacher: Teacher) => {
+    setResettingId(`teacher-${teacher.id}`)
+    const result = await resetTeacherPassword(teacher.id)
+    setResettingId(null)
+
+    if (result.error || !result.tempPassword) {
+      window.alert(result.error || 'Réinitialisation impossible.')
+      return
+    }
+
+    setResetPasswordInfo({
+      name: result.fullName || teacher.full_name,
+      password: result.tempPassword,
+    })
+  }
+
+  const handleResetReceptionPassword = async (profile: ReceptionUser) => {
+    setResettingId(`reception-${profile.id}`)
+    const result = await resetReceptionPassword(profile.id)
+    setResettingId(null)
+
+    if (result.error || !result.tempPassword) {
+      window.alert(result.error || 'Réinitialisation impossible.')
+      return
+    }
+
+    setResetPasswordInfo({
+      name: result.fullName || profile.full_name || 'Réceptionniste',
+      password: result.tempPassword,
+    })
   }
 
   return (
@@ -161,7 +204,8 @@ export default function TeachersPage() {
                       <th>Email</th>
                       <th>Téléphone</th>
                       <th>Langues</th>
-                      <th>Taux horaire</th>
+                      <th>Tarif 1h / 2h</th>
+                      <th>Tarif 1h30 / 3h</th>
                       <th>Badges</th>
                       <th>Statut</th>
                       <th>Actions</th>
@@ -174,7 +218,8 @@ export default function TeachersPage() {
                         <td>{teacher.email || '-'}</td>
                         <td>{teacher.phone || '-'}</td>
                         <td>{teacher.languages?.join(', ') || '-'}</td>
-                        <td>{teacher.hourly_rate}€/h</td>
+                        <td>{formatTeacherRate(teacher.hourly_rate_short, teacher.hourly_rate)} MAD/h</td>
+                        <td>{formatTeacherRate(teacher.hourly_rate_long, teacher.hourly_rate)} MAD/h</td>
                         <td>
                           <div className="brand-badge-chip-list">
                             {(badgeSummaries.find((summary) => summary.teacher_id === teacher.id)?.badges || []).slice(0, 2).map((badge) => (
@@ -202,12 +247,21 @@ export default function TeachersPage() {
                                 setModalRole('teacher')
                                 setShowModal(true)
                               }}
+                              title="Modifier"
                             >
                               <Edit2 size={15} />
                             </button>
                             <button
+                              className="brand-staff-icon-btn"
+                              onClick={() => handleResetTeacherPassword(teacher)}
+                              title="Générer un mot de passe"
+                            >
+                              {resettingId === `teacher-${teacher.id}` ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> : <KeyRound size={15} />}
+                            </button>
+                            <button
                               className={`brand-staff-icon-btn ${teacher.status === 'active' ? 'danger' : 'success'}`}
                               onClick={() => handleToggleStatus(teacher)}
+                              title={teacher.status === 'active' ? 'Désactiver' : 'Réactiver'}
                             >
                               {teacher.status === 'active' ? <UserX size={15} /> : <UserCheck size={15} />}
                             </button>
@@ -269,12 +323,21 @@ export default function TeachersPage() {
                                 setModalRole('reception')
                                 setShowModal(true)
                               }}
+                              title="Modifier"
                             >
                               <Edit2 size={15} />
                             </button>
                             <button
+                              className="brand-staff-icon-btn"
+                              onClick={() => handleResetReceptionPassword(profile)}
+                              title="Générer un mot de passe"
+                            >
+                              {resettingId === `reception-${profile.id}` ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> : <KeyRound size={15} />}
+                            </button>
+                            <button
                               className={`brand-staff-icon-btn ${profile.status === 'active' ? 'danger' : 'success'}`}
                               onClick={() => handleToggleReceptionStatus(profile)}
+                              title={profile.status === 'active' ? 'Désactiver' : 'Réactiver'}
                             >
                               {profile.status === 'active' ? <UserX size={15} /> : <UserCheck size={15} />}
                             </button>
@@ -302,6 +365,25 @@ export default function TeachersPage() {
           }}
         />
       )}
+
+      {resetPasswordInfo && (
+        <div className="modal-overlay" onClick={() => setResetPasswordInfo(null)}>
+          <div className="brand-modal" onClick={(e) => e.stopPropagation()}>
+            <h2 className="brand-modal-title">Mot de passe réinitialisé</h2>
+            <p className="brand-modal-copy">
+              Un nouveau mot de passe temporaire a été généré pour <strong>{resetPasswordInfo.name}</strong>.
+            </p>
+            <div className="brand-modal-password">{resetPasswordInfo.password}</div>
+            <button
+              className="brand-staff-btn brand-staff-btn-primary"
+              style={{ width: '100%' }}
+              onClick={() => setResetPasswordInfo(null)}
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -324,7 +406,8 @@ function StaffModal({
   const [email, setEmail] = useState(teacher?.email || receptionUser?.email || '')
   const [phone, setPhone] = useState(teacher?.phone || receptionUser?.phone || '')
   const [languages, setLanguages] = useState(teacher?.languages?.join(', ') || '')
-  const [hourlyRate, setHourlyRate] = useState(String(teacher?.hourly_rate || ''))
+  const [hourlyRateShort, setHourlyRateShort] = useState(String(teacher?.hourly_rate_short ?? teacher?.hourly_rate ?? '75'))
+  const [hourlyRateLong, setHourlyRateLong] = useState(String(teacher?.hourly_rate_long ?? teacher?.hourly_rate ?? '66.67'))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [tempPassword, setTempPassword] = useState('')
@@ -341,7 +424,8 @@ function StaffModal({
         full_name: fullName,
         phone,
         languages: langArray,
-        hourly_rate: Number(hourlyRate) || 0,
+        hourly_rate_short: Number(hourlyRateShort) || 0,
+        hourly_rate_long: Number(hourlyRateLong) || 0,
       })
       if (res.error) {
         setError(res.error)
@@ -365,7 +449,8 @@ function StaffModal({
             email,
             phone,
             languages: langArray,
-            hourly_rate: Number(hourlyRate) || 0,
+            hourly_rate_short: Number(hourlyRateShort) || 0,
+            hourly_rate_long: Number(hourlyRateLong) || 0,
           })
         : await createReceptionUser({
             full_name: fullName,
@@ -457,13 +542,23 @@ function StaffModal({
                 />
               </div>
               <div>
-                <label className="brand-modal-label">Taux horaire (€)</label>
+                <label className="brand-modal-label">Tarif horaire 1h / 2h (MAD)</label>
                 <input
                   className="input"
                   type="number"
                   step="0.01"
-                  value={hourlyRate}
-                  onChange={(e) => setHourlyRate(e.target.value)}
+                  value={hourlyRateShort}
+                  onChange={(e) => setHourlyRateShort(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="brand-modal-label">Tarif horaire 1h30 / 3h (MAD)</label>
+                <input
+                  className="input"
+                  type="number"
+                  step="0.01"
+                  value={hourlyRateLong}
+                  onChange={(e) => setHourlyRateLong(e.target.value)}
                 />
               </div>
             </>

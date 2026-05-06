@@ -6,6 +6,13 @@ import { generateCsv, downloadCsv } from '@/lib/utils'
 import type { TeacherReport } from '@/lib/types'
 import { CreditCard, Download, Loader2, Calendar } from 'lucide-react'
 
+function formatMad(value: number): string {
+  return `${value.toLocaleString('fr-MA', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} MAD`
+}
+
 export default function PaymentsPage() {
   const [reports, setReports] = useState<TeacherReport[]>([])
   const [loading, setLoading] = useState(false)
@@ -26,12 +33,12 @@ export default function PaymentsPage() {
   }
 
   const handleExportCsv = () => {
-    const headers = ['Professeur', 'Heures totales', 'Taux horaire (€)', 'Montant à payer (€)']
+    const headers = ['Professeur', 'Heures totales', 'Taux horaire (MAD)', 'Montant à payer (MAD)']
     const rows = reports.map((r) => [
       r.teacher_name,
       String(r.total_hours),
-      String(r.hourly_rate),
-      String(r.estimated_payment),
+      formatMad(r.hourly_rate),
+      formatMad(r.estimated_payment),
     ])
     const csv = generateCsv(headers, rows)
     downloadCsv(csv, `paiements_${month}.csv`)
@@ -89,7 +96,7 @@ export default function PaymentsPage() {
             <p style={{ fontSize: '0.875rem', opacity: 0.9, marginBottom: '0.25rem' }}>
               Total des paiements · {monthLabel}
             </p>
-            <p style={{ fontSize: '2.5rem', fontWeight: 800 }}>{totalPayment.toFixed(2)}€</p>
+            <p style={{ fontSize: '2.5rem', fontWeight: 800 }}>{formatMad(totalPayment)}</p>
           </div>
 
           {/* Payment cards */}
@@ -99,13 +106,13 @@ export default function PaymentsPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.75rem' }}>
                   <p style={{ fontWeight: 700, fontSize: '1rem' }}>{r.teacher_name}</p>
                   <span style={{ fontSize: '1.25rem', fontWeight: 800, color: '#10b981' }}>
-                    {r.estimated_payment.toFixed(2)}€
+                    {formatMad(r.estimated_payment)}
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8125rem', color: '#64748b' }}>
                   <span>{r.total_hours.toFixed(1)}h travaillées</span>
                   <span>×</span>
-                  <span>{r.hourly_rate}€/h</span>
+                  <span>{formatMad(r.hourly_rate)} / h</span>
                 </div>
                 <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.5rem' }}>
                   {r.total_sessions} session{r.total_sessions > 1 ? 's' : ''}

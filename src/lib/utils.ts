@@ -35,6 +35,11 @@ export function hoursDecimal(minutes: number): string {
   return (minutes / 60).toFixed(1)
 }
 
+export function sessionTypeLabel(value?: string): string {
+  if (value === 'one_to_one') return 'One-to-one'
+  return 'Normal'
+}
+
 /**
  * Generate CSV string from rows of data.
  */

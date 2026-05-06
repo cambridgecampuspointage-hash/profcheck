@@ -1,4 +1,4 @@
-import { Home } from 'lucide-react'
+import { Clock3, Home } from 'lucide-react'
 import { BrandShell, type BrandNavItem } from '@/components/brand-shell'
 
 const navItems: BrandNavItem[] = [
@@ -7,6 +7,12 @@ const navItems: BrandNavItem[] = [
     label: 'Accueil réception',
     shortLabel: 'Accueil',
     icon: <Home size={16} />,
+  },
+  {
+    href: '/pointage-reception',
+    label: 'Pointage réception',
+    shortLabel: 'Pointage',
+    icon: <Clock3 size={16} />,
   },
 ]
 

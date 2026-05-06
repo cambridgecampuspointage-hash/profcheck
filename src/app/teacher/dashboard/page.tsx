@@ -102,6 +102,16 @@ export default async function TeacherDashboard() {
       </section>
 
       <div className="brand-action-grid">
+        <Link href="/teacher/planning" className="brand-card brand-action-card">
+          <div className="brand-action-icon" style={{ background: '#eef1f8', color: '#1b2d5b' }}>
+            <CalendarDays size={22} />
+          </div>
+          <div>
+            <div className="brand-action-title">Voir mon planning</div>
+            <div className="brand-action-copy">Consulte les créneaux prévus et le prévu vs réel</div>
+          </div>
+        </Link>
+
         <Link href="/teacher/scan" className="brand-card brand-action-card">
           <div className="brand-action-icon" style={{ background: '#eef1f8', color: '#1b2d5b' }}>
             <QrCode size={22} />

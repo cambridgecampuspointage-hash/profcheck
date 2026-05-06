@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ArrowLeft, Clock3, QrCode, Users } from 'lucide-react'
 import { getAdminStats, getRooms, getUserProfile } from '@/lib/actions'
+import { ReceptionWelcomePopup } from '@/app/reception/components/ReceptionWelcomePopup'
 import type { Center, Room } from '@/lib/types'
 
 export default async function ReceptionDashboard() {
@@ -10,6 +11,8 @@ export default async function ReceptionDashboard() {
 
   return (
     <div>
+      <ReceptionWelcomePopup fullName={profile?.full_name} />
+
       <div className="brand-page-header">
         {profile?.role === 'admin' && (
           <div style={{ marginBottom: '0.85rem' }}>

@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { getAttendanceSessions, getCorrectionRequests, getRooms, getTeachers, reviewCorrectionRequest } from '@/lib/actions'
-import { formatDate, formatDateTime, formatTime, minutesToHoursMinutes } from '@/lib/utils'
+import { formatDate, formatDateTime, formatTime, minutesToHoursMinutes, sessionTypeLabel } from '@/lib/utils'
 import type { AttendanceCorrectionRequest, AttendanceSession, Teacher, Room } from '@/lib/types'
-import { CheckCircle2, Filter, Loader2, MessageSquareWarning, XCircle } from 'lucide-react'
+import { CheckCircle2, Eye, Filter, Loader2, MessageSquareWarning, XCircle } from 'lucide-react'
+import Image from 'next/image'
 
 const correctionTypeLabels = {
   missed_start: 'Début oublié',
@@ -20,6 +21,7 @@ export default function AttendancePage() {
   const [correctionRequests, setCorrectionRequests] = useState<AttendanceCorrectionRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [reviewingId, setReviewingId] = useState<string | null>(null)
+  const [signatureSession, setSignatureSession] = useState<AttendanceSession | null>(null)
   const [filters, setFilters] = useState({
     teacherId: '',
     roomId: '',
@@ -269,9 +271,12 @@ export default function AttendancePage() {
                       <th>Professeur</th>
                       <th>Salle</th>
                       <th>Date</th>
+                      <th>Type</th>
                       <th>Début</th>
                       <th>Fin</th>
-                      <th>Durée</th>
+                      <th>Durée réelle</th>
+                      <th>Durée payée</th>
+                      <th>Signature</th>
                       <th>Statut</th>
                       <th>Raison</th>
                     </tr>
@@ -285,9 +290,24 @@ export default function AttendancePage() {
                           <td className="brand-staff-strong">{teacherName}</td>
                           <td>{roomName}</td>
                           <td>{formatDate(session.started_at)}</td>
+                          <td>{sessionTypeLabel(session.session_type)}</td>
                           <td>{formatTime(session.started_at)}</td>
                           <td>{session.ended_at ? formatTime(session.ended_at) : '-'}</td>
                           <td>{session.duration_minutes ? minutesToHoursMinutes(session.duration_minutes) : '-'}</td>
+                          <td>{session.planned_duration_minutes ? minutesToHoursMinutes(session.planned_duration_minutes) : '-'}</td>
+                          <td>
+                            {session.signature_data_url ? (
+                              <button
+                                className="brand-staff-icon-btn"
+                                onClick={() => setSignatureSession(session)}
+                                title="Voir la signature"
+                              >
+                                <Eye size={15} />
+                              </button>
+                            ) : (
+                              <span style={{ color: 'var(--brand-subtle)', fontSize: '0.8rem' }}>Aucune</span>
+                            )}
+                          </td>
                           <td>{getStatusBadge(session.status)}</td>
                           <td style={{ color: '#b24534', fontSize: '0.84rem' }}>{session.fraud_reason || '-'}</td>
                         </tr>
@@ -300,6 +320,48 @@ export default function AttendancePage() {
           </section>
         </div>
       )}
+
+      {signatureSession ? (
+        <div className="modal-overlay" onClick={() => setSignatureSession(null)}>
+          <div className="brand-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="brand-modal-head">
+              <h2 className="brand-modal-title">Signature du professeur</h2>
+              <button className="brand-modal-close" onClick={() => setSignatureSession(null)}>
+                <XCircle size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gap: '0.65rem', marginBottom: '1rem', color: 'var(--brand-muted)', fontSize: '0.86rem' }}>
+              <div><strong style={{ color: 'var(--brand-navy)' }}>Professeur:</strong> {(signatureSession.teacher as unknown as { full_name?: string })?.full_name || '-'}</div>
+              <div><strong style={{ color: 'var(--brand-navy)' }}>Salle:</strong> {(signatureSession.room as unknown as { name?: string })?.name || '-'}</div>
+              <div><strong style={{ color: 'var(--brand-navy)' }}>Date:</strong> {formatDateTime(signatureSession.started_at)}</div>
+              <div><strong style={{ color: 'var(--brand-navy)' }}>Type:</strong> {sessionTypeLabel(signatureSession.session_type)}</div>
+            </div>
+
+            {signatureSession.signature_data_url ? (
+              <div
+                style={{
+                  border: '1px solid var(--brand-border)',
+                  borderRadius: 18,
+                  padding: '0.75rem',
+                  background: 'var(--brand-paper)',
+                }}
+              >
+                <Image
+                  src={signatureSession.signature_data_url}
+                  alt="Signature du professeur"
+                  width={800}
+                  height={320}
+                  unoptimized
+                  style={{ width: '100%', height: 'auto', display: 'block', borderRadius: 12, background: '#fff' }}
+                />
+              </div>
+            ) : (
+              <div className="brand-empty">Aucune signature enregistrée pour cette session.</div>
+            )}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

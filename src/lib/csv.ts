@@ -13,11 +13,10 @@ export function frNum(value: number, decimals = 2): string {
 }
 
 export function frCurrency(value: number): string {
-  return value.toLocaleString('fr-FR', {
-    style: 'currency',
-    currency: 'EUR',
+  return `${value.toLocaleString('fr-MA', {
     minimumFractionDigits: 2,
-  })
+    maximumFractionDigits: 2,
+  })} MAD`
 }
 
 export function frDate(dateStr: string): string {
@@ -80,8 +79,8 @@ export function buildPayrollCsv(options: ExportOptions): string {
     'Professeur',
     'Nb sessions',
     'Heures totales',
-    'Taux horaire (€)',
-    'Rémunération estimée (€)',
+    'Taux horaire (MAD)',
+    'Rémunération estimée (MAD)',
     '% du total heures',
     '% du total paiement',
     'Statut',
