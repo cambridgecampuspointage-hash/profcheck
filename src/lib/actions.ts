@@ -369,6 +369,7 @@ export async function validateAttendanceScan(
   latitude: number,
   longitude: number,
   options?: {
+    gpsAccuracyMeters?: number
     plannedDurationMinutes?: number
     sessionType?: 'standard' | 'one_to_one'
     signatureDataUrl?: string
@@ -426,10 +427,31 @@ export async function validateAttendanceScan(
   if (!center) return { success: false, message: 'Centre non trouvé.' }
 
   const distance = calculateDistanceMeters(latitude, longitude, center.latitude, center.longitude)
+  const gpsAccuracyMeters = Number.isFinite(options?.gpsAccuracyMeters)
+    ? Math.max(0, Number(options?.gpsAccuracyMeters))
+    : 0
+  const gpsToleranceMeters = Math.min(gpsAccuracyMeters, 60)
+  const fallbackToleranceMeters = gpsAccuracyMeters > 0 ? 0 : 25
+  const effectiveRadiusMeters = center.allowed_radius_meters + gpsToleranceMeters + fallbackToleranceMeters
 
-  if (distance > center.allowed_radius_meters) {
-    await logAttempt(admin, teacher.id, centerId, roomId, token, action, latitude, longitude, distance, 'rejected', `Hors zone: ${Math.round(distance)}m`)
-    return { success: false, message: `Pointage refusé : vous êtes hors zone du centre (${Math.round(distance)}m).` }
+  if (distance > effectiveRadiusMeters) {
+    await logAttempt(
+      admin,
+      teacher.id,
+      centerId,
+      roomId,
+      token,
+      action,
+      latitude,
+      longitude,
+      distance,
+      'rejected',
+      `Hors zone: ${Math.round(distance)}m (rayon ${center.allowed_radius_meters}m, marge GPS ${Math.round(gpsToleranceMeters + fallbackToleranceMeters)}m)`
+    )
+    return {
+      success: false,
+      message: `Pointage refusé : vous êtes hors zone du centre (${Math.round(distance)}m).`,
+    }
   }
 
   // 6. Handle START action

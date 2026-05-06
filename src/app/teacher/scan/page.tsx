@@ -156,7 +156,10 @@ export default function ScanPage() {
         qrPayload.room_id,
         selectedAction,
         position.coords.latitude,
-        position.coords.longitude
+        position.coords.longitude,
+        {
+          gpsAccuracyMeters: position.coords.accuracy,
+        }
       )
       setResult(res)
       setStep('result')
@@ -191,6 +194,7 @@ export default function ScanPage() {
         position.coords.latitude,
         position.coords.longitude,
         {
+          gpsAccuracyMeters: position.coords.accuracy,
           plannedDurationMinutes: plannedDuration,
           sessionType,
           signatureDataUrl,

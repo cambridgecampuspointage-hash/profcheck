@@ -150,6 +150,7 @@ export interface ScanRequest {
   action: 'start' | 'end'
   latitude: number
   longitude: number
+  gps_accuracy_meters?: number
   planned_duration_minutes?: number
   session_type?: 'standard' | 'one_to_one'
   signature_data_url?: string
