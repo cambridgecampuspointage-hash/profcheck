@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { CalendarDays, Clock3, MapPin } from 'lucide-react'
 import { getTeacherPlannedSessions, getUserProfile } from '@/lib/actions'
-import { formatIsoDate, getWeekDates, getWeekStart } from '@/lib/planning/generateWeekSessions'
+import { formatIsoDate, getWeekDates, getWeekStart } from '@/lib/planning/dateUtils'
 import { DAY_LABELS } from '@/types/planning'
 import { StatusBadge } from '@/app/dashboard/planning/components/StatusBadge'
 

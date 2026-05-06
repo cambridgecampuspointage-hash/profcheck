@@ -1,7 +1,7 @@
 'use client'
 
 import { AUDIENCE_OPTIONS, DAY_LABELS, type PlannedSession } from '@/types/planning'
-import { formatIsoDate } from '@/lib/planning/generateWeekSessions'
+import { formatIsoDate } from '@/lib/planning/dateUtils'
 import { StatusBadge } from './StatusBadge'
 
 function durationLabel(minutes: number) {

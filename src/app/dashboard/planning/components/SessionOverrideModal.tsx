@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import type { Room, Teacher } from '@/lib/types'
-import { parseLocalIsoDate } from '@/lib/planning/generateWeekSessions'
+import { parseLocalIsoDate } from '@/lib/planning/dateUtils'
 import type { PlannedSession } from '@/types/planning'
 
 type OverrideAction = 'change_teacher' | 'cancel' | 'change_time' | 'other'

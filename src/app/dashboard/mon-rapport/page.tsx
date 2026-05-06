@@ -8,7 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 import { getMyTeacherReportData } from '@/lib/actions'
 import type { AttendanceSession, Teacher } from '@/lib/types'
 import { computeTeacherMonthKpis } from '@/lib/kpis/computeTeacherKpis'
-import { formatIsoDate } from '@/lib/planning/generateWeekSessions'
+import { formatIsoDate } from '@/lib/planning/dateUtils'
 import type { PlannedSession } from '@/types/planning'
 import { KpiCard } from '../components/kpis/KpiCard'
 
