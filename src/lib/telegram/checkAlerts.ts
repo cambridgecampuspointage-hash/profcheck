@@ -55,6 +55,11 @@ type AttendanceEvent = {
   room: { name: string } | null
 }
 
+type AppSettingsRow = {
+  auto_close_active_sessions: boolean
+  auto_close_after_minutes: number
+}
+
 function createServiceClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -553,4 +558,65 @@ export async function buildDailySummary(
     referenceDate: today,
     messageText,
   })
+}
+
+export async function autoCloseForgottenAttendanceSessions(
+  supabase: SupabaseClient,
+): Promise<number> {
+  const { data: settings } = await supabase
+    .from('app_settings')
+    .select('auto_close_active_sessions, auto_close_after_minutes')
+    .eq('id', 'global')
+    .maybeSingle()
+
+  const appSettings = settings as AppSettingsRow | null
+  if (!appSettings?.auto_close_active_sessions) return 0
+
+  const thresholdDate = new Date(Date.now() - appSettings.auto_close_after_minutes * 60_000).toISOString()
+
+  const { data: sessions, error } = await supabase
+    .from('attendance_sessions')
+    .select('id, started_at, status')
+    .eq('status', 'active')
+    .lte('started_at', thresholdDate)
+
+  if (error) {
+    console.error('[telegram] autoCloseForgottenAttendanceSessions:', error.message)
+    return 0
+  }
+
+  const staleSessions = (sessions || []) as Array<{ id: string; started_at: string; status: string }>
+  let closedCount = 0
+
+  for (const session of staleSessions) {
+    const endedAt = new Date()
+    const startedAt = new Date(session.started_at)
+    const durationMinutes = Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 60000))
+
+    const { error: updateError } = await supabase
+      .from('attendance_sessions')
+      .update({
+        ended_at: endedAt.toISOString(),
+        duration_minutes: durationMinutes,
+        end_status: 'auto_closed',
+        status: 'completed',
+      })
+      .eq('id', session.id)
+      .eq('status', 'active')
+
+    if (updateError) {
+      console.error('[telegram] autoCloseForgottenAttendanceSessions update:', updateError.message)
+      continue
+    }
+
+    await supabase
+      .from('planned_sessions')
+      .update({ status: 'completed' })
+      .eq('linked_session_id', session.id)
+      .in('status', ['scheduled', 'in_progress'])
+
+    closedCount += 1
+  }
+
+  return closedCount
 }

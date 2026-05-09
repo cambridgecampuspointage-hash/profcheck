@@ -5,6 +5,14 @@ import { getRooms, getCenters, createRoom, updateRoom, createCenter, deleteRoom,
 import type { Room, Center } from '@/lib/types'
 import { Plus, Edit2, QrCode, X, Loader2, Building2, Trash2 } from 'lucide-react'
 import Link from 'next/link'
+import { LocationMap } from '@/components/ui/expand-map'
+
+function formatCoordinates(latitude: number, longitude: number) {
+  const latDirection = latitude >= 0 ? 'N' : 'S'
+  const lngDirection = longitude >= 0 ? 'E' : 'W'
+
+  return `${Math.abs(latitude).toFixed(4)}° ${latDirection}, ${Math.abs(longitude).toFixed(4)}° ${lngDirection}`
+}
 
 export default function RoomsPage() {
   const [rooms, setRooms] = useState<(Room & { center?: Center })[]>([])
@@ -112,6 +120,13 @@ export default function RoomsPage() {
                       <div>
                         <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--brand-navy)' }}>{center.name}</div>
                         <div style={{ color: 'var(--brand-subtle)', fontSize: '0.82rem', marginTop: '0.35rem' }}>{center.address || 'Adresse non renseignée'}</div>
+                        <div style={{ margin: '0.9rem 0', minHeight: '46px' }}>
+                          <LocationMap
+                            compact
+                            location={center.address || center.name}
+                            coordinates={formatCoordinates(center.latitude, center.longitude)}
+                          />
+                        </div>
                         <div style={{ color: 'var(--brand-subtle)', fontSize: '0.78rem', marginTop: '0.5rem' }}>
                           Rayon: {center.allowed_radius_meters}m
                         </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { DayAttendanceCard } from './components/DayAttendanceCard'
@@ -229,6 +230,12 @@ export default function ReceptionAdminDashboardPage() {
   return (
     <div style={pageStyle}>
       <div style={containerStyle}>
+        <div>
+          <Link href="/dashboard" style={backLinkStyle}>
+            ← Retour à l’accueil admin
+          </Link>
+        </div>
+
         <header style={heroStyle}>
           <div>
             <div style={eyebrowStyle}>Administration RH</div>
@@ -423,6 +430,15 @@ const heroStyle = {
   gap: '1rem',
   flexWrap: 'wrap' as const,
   alignItems: 'center',
+}
+
+const backLinkStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.35rem',
+  color: '#1B2D5B',
+  fontWeight: 800,
+  textDecoration: 'none',
 }
 
 const eyebrowStyle = {

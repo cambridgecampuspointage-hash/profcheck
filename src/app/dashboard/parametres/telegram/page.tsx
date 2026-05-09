@@ -11,6 +11,7 @@ type AlertHistoryEntry = {
   sent_at: string
   sent_ok: boolean
   message: string | null
+  error_message?: string | null
 }
 
 const ALERT_PREFERENCES = [
@@ -64,6 +65,12 @@ export default function TelegramSettingsPage() {
   const [loadingHistory, setLoadingHistory] = useState(true)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [historyFilters, setHistoryFilters] = useState({
+    type: '',
+    status: '',
+    dateFrom: '',
+    dateTo: '',
+  })
 
   useEffect(() => {
     let cancelled = false
@@ -138,6 +145,24 @@ export default function TelegramSettingsPage() {
       window.localStorage.setItem('telegram_alert_preferences', JSON.stringify(preferences))
     }
   }, [preferences])
+
+  const loadHistory = async (filters = historyFilters) => {
+    setLoadingHistory(true)
+    const params = new URLSearchParams({ mode: 'history' })
+    if (filters.type) params.set('type', filters.type)
+    if (filters.status) params.set('status', filters.status)
+    if (filters.dateFrom) params.set('dateFrom', filters.dateFrom)
+    if (filters.dateTo) params.set('dateTo', filters.dateTo)
+
+    const response = await fetch(`/api/alerts/test?${params.toString()}`)
+    const payload = (await response.json()) as { ok: boolean; alerts?: AlertHistoryEntry[]; error?: string }
+    if (payload.ok) {
+      setHistory(payload.alerts || [])
+    } else {
+      setErrorMessage(payload.error || 'Impossible de recharger l’historique.')
+    }
+    setLoadingHistory(false)
+  }
 
   const sendTestMessage = async () => {
     setLoadingTest(true)
@@ -291,6 +316,40 @@ export default function TelegramSettingsPage() {
         <section style={cardStyle}>
           <div style={sectionTitleStyle}>Historique des alertes envoyées</div>
 
+          <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: '1rem' }}>
+            <select
+              value={historyFilters.type}
+              onChange={(event) => setHistoryFilters((current) => ({ ...current, type: event.target.value }))}
+              style={filterInputStyle}
+            >
+              <option value="">Tous les types</option>
+              {ALERT_PREFERENCES.map((preference) => (
+                <option key={preference.key} value={preference.key}>{preference.label}</option>
+              ))}
+            </select>
+            <select
+              value={historyFilters.status}
+              onChange={(event) => setHistoryFilters((current) => ({ ...current, status: event.target.value }))}
+              style={filterInputStyle}
+            >
+              <option value="">Tous les statuts</option>
+              <option value="sent">Envoyé</option>
+              <option value="error">Erreur</option>
+            </select>
+            <input
+              type="date"
+              value={historyFilters.dateFrom}
+              onChange={(event) => setHistoryFilters((current) => ({ ...current, dateFrom: event.target.value }))}
+              style={filterInputStyle}
+            />
+            <input
+              type="date"
+              value={historyFilters.dateTo}
+              onChange={(event) => setHistoryFilters((current) => ({ ...current, dateTo: event.target.value }))}
+              style={filterInputStyle}
+            />
+          </div>
+
           {loadingHistory ? (
             <div style={{ color: '#8B7D6B' }}>Chargement de l’historique...</div>
           ) : history.length === 0 ? (
@@ -334,7 +393,7 @@ export default function TelegramSettingsPage() {
                               {entry.sent_ok ? 'Envoyé' : 'Erreur'}
                             </span>
                           </td>
-                          <td style={cellStyle}>{truncateMessage(entry.message)}</td>
+                          <td style={cellStyle}>{truncateMessage(entry.sent_ok ? entry.message : entry.error_message || entry.message)}</td>
                         </tr>
                       )
                     })}
@@ -342,23 +401,13 @@ export default function TelegramSettingsPage() {
                 </table>
               </div>
 
-              <button
-                type="button"
-                onClick={async () => {
-                  setLoadingHistory(true)
-                  const response = await fetch('/api/alerts/test?mode=history')
-                  const payload = (await response.json()) as { ok: boolean; alerts?: AlertHistoryEntry[]; error?: string }
-                  if (payload.ok) {
-                    setHistory(payload.alerts || [])
-                  } else {
-                    setErrorMessage(payload.error || 'Impossible de recharger l’historique.')
-                  }
-                  setLoadingHistory(false)
-                }}
-                style={{ ...secondaryButtonStyle, marginTop: '1rem' }}
-              >
-                Voir tout l’historique
-              </button>
+                <button
+                  type="button"
+                  onClick={() => void loadHistory()}
+                  style={{ ...secondaryButtonStyle, marginTop: '1rem' }}
+                >
+                Filtrer / recharger
+                </button>
             </>
           )}
         </section>
@@ -439,6 +488,15 @@ const headerStyle: React.CSSProperties = {
 
 const cellStyle: React.CSSProperties = {
   padding: '0.9rem 0.75rem',
+  color: '#1B2D5B',
+  fontWeight: 600,
+}
+
+const filterInputStyle: React.CSSProperties = {
+  border: '1px solid #E8E2D5',
+  borderRadius: 14,
+  padding: '0.8rem 0.9rem',
+  background: '#FFFFFF',
   color: '#1B2D5B',
   fontWeight: 600,
 }

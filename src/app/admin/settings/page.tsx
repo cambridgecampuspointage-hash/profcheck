@@ -1,20 +1,32 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getCenters, createCenter, updateCenter } from '@/lib/actions'
-import type { Center } from '@/lib/types'
-import { Settings as SettingsIcon, MapPin, Plus, X, Loader2 } from 'lucide-react'
+import { getAppSettings, getCenters, createCenter, updateAppSettings, updateCenter } from '@/lib/actions'
+import type { AppSettings, Center } from '@/lib/types'
+import { Edit2, Settings as SettingsIcon, MapPin, Plus, X, Loader2 } from 'lucide-react'
+import { LocationMap } from '@/components/ui/expand-map'
+
+function formatCoordinates(latitude: number, longitude: number) {
+  const latDirection = latitude >= 0 ? 'N' : 'S'
+  const lngDirection = longitude >= 0 ? 'E' : 'W'
+
+  return `${Math.abs(latitude).toFixed(4)}° ${latDirection}, ${Math.abs(longitude).toFixed(4)}° ${lngDirection}`
+}
 
 export default function SettingsPage() {
   const [centers, setCenters] = useState<Center[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
+  const [editingCenter, setEditingCenter] = useState<Center | null>(null)
   const [togglingCenterId, setTogglingCenterId] = useState<string | null>(null)
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null)
+  const [savingAppSettings, setSavingAppSettings] = useState(false)
 
   const fetchCenters = async () => {
     setLoading(true)
-    const data = await getCenters()
-    setCenters(data as Center[])
+    const [centerData, settingsData] = await Promise.all([getCenters(), getAppSettings()])
+    setCenters(centerData as Center[])
+    setAppSettings(settingsData as AppSettings | null)
     setLoading(false)
   }
 
@@ -22,9 +34,10 @@ export default function SettingsPage() {
     let active = true
 
     async function loadCenters() {
-      const data = await getCenters()
+      const [centerData, settingsData] = await Promise.all([getCenters(), getAppSettings()])
       if (!active) return
-      setCenters(data as Center[])
+      setCenters(centerData as Center[])
+      setAppSettings(settingsData as AppSettings | null)
       setLoading(false)
     }
 
@@ -41,6 +54,22 @@ export default function SettingsPage() {
       gps_verification_enabled: !center.gps_verification_enabled,
     })
     setTogglingCenterId(null)
+
+    if (result.error) {
+      window.alert(result.error)
+      return
+    }
+
+    void fetchCenters()
+  }
+
+  const saveAppSettings = async (data: Partial<AppSettings>) => {
+    setSavingAppSettings(true)
+    const result = await updateAppSettings({
+      auto_close_active_sessions: data.auto_close_active_sessions,
+      auto_close_after_minutes: data.auto_close_after_minutes,
+    })
+    setSavingAppSettings(false)
 
     if (result.error) {
       window.alert(result.error)
@@ -83,6 +112,13 @@ export default function SettingsPage() {
               <div key={center.id} className="card">
                 <p style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.25rem' }}>{center.name}</p>
                 <p style={{ color: '#64748b', fontSize: '0.8125rem', marginBottom: '0.5rem' }}>{center.address || 'Adresse non renseignée'}</p>
+                <div style={{ marginBottom: '0.75rem', minHeight: '46px' }}>
+                  <LocationMap
+                    compact
+                    location={center.address || center.name}
+                    coordinates={formatCoordinates(center.latitude, center.longitude)}
+                  />
+                </div>
                 <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.8125rem', color: '#94a3b8' }}>
                   <span>📍 {center.latitude?.toFixed(6)}, {center.longitude?.toFixed(6)}</span>
                   <span>📏 Rayon: {center.allowed_radius_meters}m</span>
@@ -98,11 +134,63 @@ export default function SettingsPage() {
                   >
                     {togglingCenterId === center.id ? <><div className="spinner" /> Mise à jour...</> : center.gps_verification_enabled ? 'Désactiver le GPS' : 'Activer le GPS'}
                   </button>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setEditingCenter(center)
+                      setShowModal(true)
+                    }}
+                  >
+                    <Edit2 size={14} /> Modifier
+                  </button>
                 </div>
               </div>
             ))}
           </div>
         )}
+      </div>
+
+      <div className="card" style={{ marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>Clôture automatique des oublis</h2>
+        <div style={{ display: 'grid', gap: '0.9rem' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.9rem', color: '#374151' }}>
+            <input
+              type="checkbox"
+              checked={appSettings?.auto_close_active_sessions || false}
+              onChange={(event) => {
+                setAppSettings((current) => current ? { ...current, auto_close_active_sessions: event.target.checked } : current)
+              }}
+            />
+            Activer la clôture automatique des sessions restées actives trop longtemps
+          </label>
+
+          <div style={{ maxWidth: 280 }}>
+            <label style={{ fontSize: '0.8125rem', fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>
+              Délai avant clôture automatique (minutes)
+            </label>
+            <input
+              className="input"
+              type="number"
+              min="30"
+              step="15"
+              value={appSettings?.auto_close_after_minutes ?? 360}
+              onChange={(event) => {
+                const nextValue = Number(event.target.value)
+                setAppSettings((current) => current ? { ...current, auto_close_after_minutes: nextValue } : current)
+              }}
+            />
+          </div>
+
+          <div>
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={savingAppSettings || !appSettings}
+              onClick={() => appSettings && void saveAppSettings(appSettings)}
+            >
+              {savingAppSettings ? <><div className="spinner" /> Enregistrement...</> : 'Enregistrer les réglages'}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* App Info */}
@@ -117,9 +205,11 @@ export default function SettingsPage() {
 
       {showModal && (
         <CenterModalInline
+          center={editingCenter}
           onClose={() => setShowModal(false)}
           onSaved={() => {
             setShowModal(false)
+            setEditingCenter(null)
             void fetchCenters()
           }}
         />
@@ -128,13 +218,13 @@ export default function SettingsPage() {
   )
 }
 
-function CenterModalInline({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  const [name, setName] = useState('')
-  const [address, setAddress] = useState('')
-  const [latitude, setLatitude] = useState('')
-  const [longitude, setLongitude] = useState('')
-  const [radius, setRadius] = useState('80')
-  const [gpsVerificationEnabled, setGpsVerificationEnabled] = useState(true)
+function CenterModalInline({ center, onClose, onSaved }: { center?: Center | null; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(center?.name || '')
+  const [address, setAddress] = useState(center?.address || '')
+  const [latitude, setLatitude] = useState(center ? String(center.latitude) : '')
+  const [longitude, setLongitude] = useState(center ? String(center.longitude) : '')
+  const [radius, setRadius] = useState(center ? String(center.allowed_radius_meters) : '80')
+  const [gpsVerificationEnabled, setGpsVerificationEnabled] = useState(center?.gps_verification_enabled ?? true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -142,13 +232,17 @@ function CenterModalInline({ onClose, onSaved }: { onClose: () => void; onSaved:
     e.preventDefault()
     setSaving(true)
     setError('')
-    const res = await createCenter({
-      name, address,
+    const payload = {
+      name,
+      address,
       latitude: Number(latitude),
       longitude: Number(longitude),
       allowed_radius_meters: Number(radius),
       gps_verification_enabled: gpsVerificationEnabled,
-    })
+    }
+    const res = center
+      ? await updateCenter(center.id, payload)
+      : await createCenter(payload)
     if (res.error) { setError(res.error); setSaving(false); return }
     onSaved()
   }
@@ -164,7 +258,7 @@ function CenterModalInline({ onClose, onSaved }: { onClose: () => void; onSaved:
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-          <h2 style={{ fontSize: '1.125rem', fontWeight: 700 }}>Ajouter un centre</h2>
+          <h2 style={{ fontSize: '1.125rem', fontWeight: 700 }}>{center ? 'Modifier le centre' : 'Ajouter un centre'}</h2>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={20} /></button>
         </div>
         {error && <div style={{ background: '#fee2e2', color: '#dc2626', padding: '0.75rem', borderRadius: 10, fontSize: '0.875rem', marginBottom: '1rem' }}>{error}</div>}
@@ -201,7 +295,7 @@ function CenterModalInline({ onClose, onSaved }: { onClose: () => void; onSaved:
             Activer la vérification GPS pour ce centre
           </label>
           <button className="btn btn-primary" type="submit" disabled={saving} style={{ width: '100%' }}>
-            {saving ? <><div className="spinner" /> Enregistrement...</> : 'Créer le centre'}
+            {saving ? <><div className="spinner" /> Enregistrement...</> : center ? 'Mettre à jour le centre' : 'Créer le centre'}
           </button>
         </form>
       </div>

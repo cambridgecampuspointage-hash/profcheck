@@ -38,12 +38,23 @@ export async function GET(request: Request) {
   }
 
   if (mode === 'history') {
+    const type = url.searchParams.get('type')
+    const status = url.searchParams.get('status')
+    const dateFrom = url.searchParams.get('dateFrom')
+    const dateTo = url.searchParams.get('dateTo')
     const service = getAlertsSupabaseClient()
-    const { data, error } = await service
+    let query = service
       .from('telegram_alerts_log')
-      .select('id, alert_type, reference_date, sent_at, sent_ok, message_text')
+      .select('id, alert_type, reference_date, sent_at, sent_ok, message_text, error_message')
       .order('sent_at', { ascending: false })
-      .limit(20)
+
+    if (type) query = query.eq('alert_type', type)
+    if (status === 'sent') query = query.eq('sent_ok', true)
+    if (status === 'error') query = query.eq('sent_ok', false)
+    if (dateFrom) query = query.gte('reference_date', dateFrom)
+    if (dateTo) query = query.lte('reference_date', dateTo)
+
+    const { data, error } = await query.limit(100)
 
     if (error) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 500 })
@@ -58,6 +69,7 @@ export async function GET(request: Request) {
         sent_at: entry.sent_at,
         sent_ok: entry.sent_ok,
         message: entry.message_text,
+        error_message: entry.error_message,
       })),
     })
   }

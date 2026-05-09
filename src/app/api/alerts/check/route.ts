@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import {
+  autoCloseForgottenAttendanceSessions,
   checkOutOfPlanningAlerts,
   checkStaffAlerts,
   checkTeacherAlerts,
@@ -38,10 +39,11 @@ export async function GET(request: Request) {
     const supabase = getAlertsSupabaseClient()
     const { today, nowTime } = getMoroccoNow()
 
-    const [teacherAlerts, outOfPlanningAlerts, staffAlerts] = await Promise.all([
+    const [teacherAlerts, outOfPlanningAlerts, staffAlerts, autoClosedSessions] = await Promise.all([
       checkTeacherAlerts(supabase, today, nowTime),
       checkOutOfPlanningAlerts(supabase, today),
       checkStaffAlerts(supabase, today, nowTime),
+      autoCloseForgottenAttendanceSessions(supabase),
     ])
 
     return NextResponse.json({
@@ -52,6 +54,7 @@ export async function GET(request: Request) {
         teacher_alerts: teacherAlerts,
         out_of_planning: outOfPlanningAlerts,
         staff_alerts: staffAlerts,
+        auto_closed_sessions: autoClosedSessions,
       },
     })
   } catch (error) {

@@ -7,6 +7,7 @@ export interface TeacherAttendanceRow {
   duration_minutes: number
   room?: string
   subject?: string
+  note?: string
   status?: 'validé' | 'en attente' | 'absent'
 }
 
@@ -248,6 +249,7 @@ export async function generateTeacherReportPdf(data: TeacherReportData): Promise
       'Durée',
       'Salle',
       'Matière',
+      'Note',
       'Statut',
     ]],
     body: data.sessions.map((session, index) => [
@@ -258,6 +260,7 @@ export async function generateTeacherReportPdf(data: TeacherReportData): Promise
       minutesLabel(session.duration_minutes),
       session.room || '—',
       session.subject || '—',
+      session.note || '—',
       session.status || 'validé',
     ]),
     foot: [[
@@ -299,11 +302,12 @@ export async function generateTeacherReportPdf(data: TeacherReportData): Promise
       3: { halign: 'center', cellWidth: 18 },
       4: { halign: 'center', cellWidth: 22 },
       5: { cellWidth: 34 },
-      6: { cellWidth: 34 },
-      7: { halign: 'center', cellWidth: 22 },
+      6: { cellWidth: 28 },
+      7: { cellWidth: 42 },
+      8: { halign: 'center', cellWidth: 18 },
     },
     didParseCell: (hookData) => {
-      if (hookData.section === 'body' && hookData.column.index === 7) {
+      if (hookData.section === 'body' && hookData.column.index === 8) {
         hookData.cell.styles.textColor = statusTone(String(hookData.cell.raw))
         hookData.cell.styles.fontStyle = 'bold'
       }

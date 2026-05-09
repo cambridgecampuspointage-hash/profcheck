@@ -35,6 +35,7 @@ export default function ScanPage() {
   const [manualLoading, setManualLoading] = useState(false)
   const [plannedDuration, setPlannedDuration] = useState<60 | 90 | 120 | 180>(60)
   const [sessionType, setSessionType] = useState<'standard' | 'one_to_one'>('standard')
+  const [teacherNotes, setTeacherNotes] = useState('')
   const [signatureDataUrl, setSignatureDataUrl] = useState('')
   const [signatureEmpty, setSignatureEmpty] = useState(true)
   const [startSetupError, setStartSetupError] = useState('')
@@ -198,6 +199,7 @@ export default function ScanPage() {
           plannedDurationMinutes: plannedDuration,
           sessionType,
           signatureDataUrl,
+          teacherNotes,
         }
       )
       setResult(res)
@@ -240,6 +242,7 @@ export default function ScanPage() {
     setManualError('')
     setPlannedDuration(60)
     setSessionType('standard')
+    setTeacherNotes('')
     setSignatureDataUrl('')
     setSignatureEmpty(true)
     setStartSetupError('')
@@ -398,7 +401,7 @@ export default function ScanPage() {
               <div>
                 <h2 className="scan-start-title" style={{ fontSize: '1.05rem', fontWeight: 700, color: '#1b2d5b' }}>Préparer le démarrage</h2>
                 <p className="scan-start-copy" style={{ color: '#64748b', fontSize: '0.87rem', marginTop: '0.15rem' }}>
-                  Choisissez la durée prévue, le type de séance puis signez avant de commencer.
+                  Choisissez la durée prévue, le type de séance, ajoutez une note si besoin puis signez avant de commencer.
                 </p>
               </div>
             </div>
@@ -472,6 +475,23 @@ export default function ScanPage() {
             </div>
 
             <div className="scan-signature-block">
+              <div className="scan-section" style={{ marginBottom: '1rem' }}>
+                <div className="scan-section-title" style={{ fontWeight: 700, color: '#1b2d5b', marginBottom: '0.65rem' }}>
+                  Note de séance
+                </div>
+                <textarea
+                  className="input"
+                  value={teacherNotes}
+                  onChange={(event) => setTeacherNotes(event.target.value.slice(0, 500))}
+                  placeholder="Ex: révision grammaticale, speaking TOEFL, préparation test, travail sur le vocabulaire..."
+                  rows={4}
+                  style={{ width: '100%', resize: 'vertical', minHeight: 110 }}
+                />
+                <div style={{ color: '#64748b', fontSize: '0.78rem', marginTop: '0.45rem' }}>
+                  Optionnel. Cette note sera visible par l’administration pour cette séance.
+                </div>
+              </div>
+
               <div className="scan-signature-head" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.75rem' }}>
                 <PenTool size={18} color="#6366f1" />
                 <div className="scan-section-title" style={{ fontWeight: 700, color: '#1b2d5b' }}>Signature du professeur</div>

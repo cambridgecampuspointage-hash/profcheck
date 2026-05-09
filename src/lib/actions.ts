@@ -14,6 +14,11 @@ import type {
   AttendanceSession,
   AttendanceCorrectionRequest,
   ReceptionUser,
+  Student,
+  StudentAttendance,
+  StudentCheckinToken,
+  StudentClass,
+  StudentPaymentRecord,
   TeacherBadge,
   TeacherBadgeSummary,
 } from '@/lib/types'
@@ -373,6 +378,7 @@ export async function validateAttendanceScan(
     plannedDurationMinutes?: number
     sessionType?: 'standard' | 'one_to_one'
     signatureDataUrl?: string
+    teacherNotes?: string
   }
 ): Promise<ScanResponse> {
   const supabase = await createClient()
@@ -459,6 +465,7 @@ export async function validateAttendanceScan(
     const plannedDurationMinutes = options?.plannedDurationMinutes
     const sessionType = options?.sessionType || 'standard'
     const signatureDataUrl = options?.signatureDataUrl?.trim()
+    const teacherNotes = options?.teacherNotes?.trim() || null
     const startedAt = new Date()
 
     if (![60, 90, 120, 180].includes(plannedDurationMinutes || 0)) {
@@ -508,6 +515,7 @@ export async function validateAttendanceScan(
         applied_hourly_rate: appliedHourlyRate,
         payable_amount: payableAmount,
         signature_data_url: signatureDataUrl,
+        teacher_notes: teacherNotes,
         status: 'active',
       })
       .select('*, room:rooms(*), center:centers(*)')
@@ -764,7 +772,7 @@ export async function getMyTeacherReportData(dateFrom: string, dateTo: string): 
 
   const { data: sessions, error } = await admin
     .from('attendance_sessions')
-    .select('started_at, ended_at, duration_minutes, planned_duration_minutes, status, session_type, applied_hourly_rate, payable_amount, room:rooms(name)')
+    .select('started_at, ended_at, duration_minutes, planned_duration_minutes, status, session_type, applied_hourly_rate, payable_amount, teacher_notes, room:rooms(name)')
     .eq('teacher_id', teacher.id)
     .eq('status', 'completed')
     .gte('started_at', startOfDateFilter(dateFrom))
@@ -785,6 +793,7 @@ export async function getMyTeacherReportData(dateFrom: string, dateTo: string): 
       duration_minutes: getPayableMinutes(session),
       room: roomName || undefined,
       subject: session.session_type === 'one_to_one' ? 'One-to-one' : 'Cours normal',
+      note: typeof session.teacher_notes === 'string' ? session.teacher_notes : undefined,
       status: 'validé' as const,
     }
   })
@@ -1386,6 +1395,42 @@ export async function updateCenter(
   return { success: true }
 }
 
+export async function getAppSettings() {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return null
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('app_settings')
+    .select('*')
+    .eq('id', 'global')
+    .maybeSingle()
+
+  return data || null
+}
+
+export async function updateAppSettings(
+  data: Partial<{
+    auto_close_active_sessions: boolean
+    auto_close_after_minutes: number
+  }>
+) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('app_settings')
+    .upsert({
+      id: 'global',
+      ...data,
+    })
+    .eq('id', 'global')
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
 export async function deleteCenter(centerId: string) {
   const { user, role } = await getSessionContext()
   if (!user || role !== 'admin') return { error: 'Accès refusé' }
@@ -1395,6 +1440,374 @@ export async function deleteCenter(centerId: string) {
     .from('centers')
     .delete()
     .eq('id', centerId)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+// ─── ADMIN - STUDENTS & CLASSES ──────────────────────────────────────────────
+
+type StudentClassPayload = {
+  center_id: string
+  teacher_id?: string | null
+  name: string
+  level?: string | null
+  status?: 'active' | 'inactive'
+}
+
+type StudentPayload = {
+  center_id?: string | null
+  full_name: string
+  phone?: string | null
+  parent_name?: string | null
+  parent_phone?: string | null
+  email?: string | null
+  payment_due_date?: string | null
+  access_status?: 'allowed' | 'blocked'
+  access_block_reason?: string | null
+  status?: 'active' | 'inactive'
+  class_ids?: string[]
+}
+
+function normalizeString(value?: string | null) {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
+
+function normalizeClassIds(classIds?: string[]) {
+  return [...new Set((classIds || []).filter(Boolean))]
+}
+
+function addMonthsToDate(date: string, months: number) {
+  const base = new Date(`${date}T00:00:00`)
+  const next = new Date(base)
+  next.setMonth(next.getMonth() + months)
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`
+}
+
+async function syncStudentClassMemberships(
+  admin: ReturnType<typeof createAdminClient>,
+  studentId: string,
+  classIds: string[]
+) {
+  const normalizedClassIds = normalizeClassIds(classIds)
+  const { data: existingRows, error: existingError } = await admin
+    .from('student_class_members')
+    .select('id, class_id')
+    .eq('student_id', studentId)
+
+  if (existingError) {
+    return { error: existingError.message }
+  }
+
+  const existingClassIds = new Set((existingRows || []).map((row) => row.class_id))
+  const nextClassIds = new Set(normalizedClassIds)
+
+  const toDelete = (existingRows || [])
+    .filter((row) => !nextClassIds.has(row.class_id))
+    .map((row) => row.id)
+
+  if (toDelete.length > 0) {
+    const { error } = await admin
+      .from('student_class_members')
+      .delete()
+      .in('id', toDelete)
+
+    if (error) return { error: error.message }
+  }
+
+  const toInsert = normalizedClassIds
+    .filter((classId) => !existingClassIds.has(classId))
+    .map((classId) => ({
+      class_id: classId,
+      student_id: studentId,
+    }))
+
+  if (toInsert.length > 0) {
+    const { error } = await admin
+      .from('student_class_members')
+      .insert(toInsert)
+
+    if (error) return { error: error.message }
+  }
+
+  return { success: true }
+}
+
+export async function getStudentClasses(): Promise<StudentClass[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('student_classes')
+    .select('*, center:centers(*), teacher:teachers(id, full_name)')
+    .order('name')
+
+  return (data || []) as StudentClass[]
+}
+
+export async function getStudents(): Promise<Student[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('students')
+    .select('*, center:centers(*)')
+    .order('full_name')
+
+  return (data || []) as Student[]
+}
+
+export async function createStudentClass(payload: StudentClassPayload) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('student_classes')
+    .insert({
+      center_id: payload.center_id,
+      teacher_id: payload.teacher_id || null,
+      name: payload.name.trim(),
+      level: normalizeString(payload.level),
+      status: payload.status || 'active',
+    })
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function updateStudentClass(classId: string, payload: Partial<StudentClassPayload>) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('student_classes')
+    .update({
+      center_id: payload.center_id,
+      teacher_id: payload.teacher_id ?? undefined,
+      name: payload.name?.trim(),
+      level: payload.level !== undefined ? normalizeString(payload.level) : undefined,
+      status: payload.status,
+    })
+    .eq('id', classId)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function createStudent(payload: StudentPayload) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const classIds = normalizeClassIds(payload.class_ids)
+  const centerId = payload.center_id || null
+
+  const { data: student, error } = await admin
+    .from('students')
+    .insert({
+      center_id: centerId,
+      full_name: payload.full_name.trim(),
+      phone: normalizeString(payload.phone),
+      parent_name: normalizeString(payload.parent_name),
+      parent_phone: normalizeString(payload.parent_phone),
+      email: normalizeString(payload.email),
+      payment_due_date: payload.payment_due_date || null,
+      access_status: payload.access_status || 'allowed',
+      access_block_reason: normalizeString(payload.access_block_reason),
+      status: payload.status || 'active',
+    })
+    .select('id')
+    .single()
+
+  if (error || !student) return { error: error?.message || 'Impossible de créer l’étudiant.' }
+
+  const membershipResult = await syncStudentClassMemberships(admin, student.id, classIds)
+  if (membershipResult.error) return membershipResult
+
+  return { success: true }
+}
+
+export async function updateStudent(studentId: string, payload: Partial<StudentPayload>) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('students')
+    .update({
+      center_id: payload.center_id,
+      full_name: payload.full_name?.trim(),
+      phone: payload.phone !== undefined ? normalizeString(payload.phone) : undefined,
+      parent_name: payload.parent_name !== undefined ? normalizeString(payload.parent_name) : undefined,
+      parent_phone: payload.parent_phone !== undefined ? normalizeString(payload.parent_phone) : undefined,
+      email: payload.email !== undefined ? normalizeString(payload.email) : undefined,
+      payment_due_date: payload.payment_due_date !== undefined ? payload.payment_due_date || null : undefined,
+      access_status: payload.access_status,
+      access_block_reason: payload.access_block_reason !== undefined ? normalizeString(payload.access_block_reason) : undefined,
+      status: payload.status,
+    })
+    .eq('id', studentId)
+
+  if (error) return { error: error.message }
+
+  if (payload.class_ids) {
+    const membershipResult = await syncStudentClassMemberships(admin, studentId, payload.class_ids)
+    if (membershipResult.error) return membershipResult
+  }
+
+  return { success: true }
+}
+
+export async function setStudentAccess(studentId: string, accessStatus: 'allowed' | 'blocked', reason?: string | null) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('students')
+    .update({
+      access_status: accessStatus,
+      access_block_reason: accessStatus === 'blocked' ? normalizeString(reason) : null,
+    })
+    .eq('id', studentId)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function generateStudentCheckinToken(classId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const token = crypto.randomUUID()
+  const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString()
+
+  await admin
+    .from('student_checkin_tokens')
+    .update({ is_active: false })
+    .eq('class_id', classId)
+    .eq('is_active', true)
+
+  const { data, error } = await admin
+    .from('student_checkin_tokens')
+    .insert({
+      class_id: classId,
+      token,
+      expires_at: expiresAt,
+      is_active: true,
+    })
+    .select('*')
+    .single()
+
+  if (error) return { error: error.message }
+  return { data: data as StudentCheckinToken }
+}
+
+export async function getStudentAttendanceToday(classId?: string): Promise<StudentAttendance[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  let query = admin
+    .from('student_attendance')
+    .select('*, student:students(*), class:student_classes(*)')
+    .eq('attendance_date', formatDateKey(new Date()))
+    .order('marked_at', { ascending: false })
+
+  if (classId) query = query.eq('class_id', classId)
+
+  const { data } = await query
+  return (data || []) as StudentAttendance[]
+}
+
+export async function getStudentPaymentRecords(studentId?: string): Promise<StudentPaymentRecord[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  let query = admin
+    .from('student_payment_records')
+    .select('*')
+    .order('paid_at', { ascending: false })
+    .order('created_at', { ascending: false })
+
+  if (studentId) query = query.eq('student_id', studentId)
+
+  const { data } = await query.limit(200)
+  return (data || []) as StudentPaymentRecord[]
+}
+
+export async function recordStudentPayment(payload: {
+  student_id: string
+  amount?: number | null
+  paid_at?: string | null
+  period_months?: number
+  notes?: string | null
+}) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const paidAt = payload.paid_at || formatDateKey(new Date())
+  const periodMonths = payload.period_months || 3
+  const nextDueDate = addMonthsToDate(paidAt, periodMonths)
+
+  const { error: paymentError } = await admin
+    .from('student_payment_records')
+    .insert({
+      student_id: payload.student_id,
+      paid_at: paidAt,
+      amount: payload.amount ?? null,
+      period_months: periodMonths,
+      next_due_date: nextDueDate,
+      notes: normalizeString(payload.notes),
+      created_by: user.id,
+    })
+
+  if (paymentError) return { error: paymentError.message }
+
+  const { error: studentError } = await admin
+    .from('students')
+    .update({
+      payment_due_date: nextDueDate,
+    })
+    .eq('id', payload.student_id)
+
+  if (studentError) return { error: studentError.message }
+  return { success: true, next_due_date: nextDueDate }
+}
+
+export async function markStudentPresentForToday(payload: {
+  student_id: string
+  class_id: string
+  planned_session_id?: string | null
+}) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const attendanceDate = formatDateKey(new Date())
+  const { error } = await admin
+    .from('student_attendance')
+    .upsert({
+      student_id: payload.student_id,
+      class_id: payload.class_id,
+      planned_session_id: payload.planned_session_id || null,
+      attendance_date: attendanceDate,
+      status: 'present',
+      marked_at: new Date().toISOString(),
+      marked_by_user_id: user.id,
+      source: 'admin',
+      notes: 'Présence ajoutée manuellement par l’administration',
+    }, {
+      onConflict: 'student_id,class_id,attendance_date',
+    })
 
   if (error) return { error: error.message }
   return { success: true }
@@ -1481,6 +1894,48 @@ export async function reviewCorrectionRequest(
     .eq('status', 'pending')
 
   if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function closeAttendanceSessionManually(sessionId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { data: session, error: sessionError } = await admin
+    .from('attendance_sessions')
+    .select('id, started_at, status')
+    .eq('id', sessionId)
+    .single()
+
+  if (sessionError || !session) return { error: 'Session introuvable.' }
+  if (session.status !== 'active') return { error: 'Seules les sessions actives peuvent être clôturées.' }
+
+  const endedAt = new Date()
+  const startedAt = new Date(session.started_at)
+  const durationMinutes = Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 60000))
+
+  const { error: updateError } = await admin
+    .from('attendance_sessions')
+    .update({
+      ended_at: endedAt.toISOString(),
+      duration_minutes: durationMinutes,
+      end_status: 'accepted',
+      status: 'completed',
+    })
+    .eq('id', sessionId)
+    .eq('status', 'active')
+
+  if (updateError) return { error: updateError.message }
+
+  await admin
+    .from('planned_sessions')
+    .update({
+      status: 'completed',
+    })
+    .eq('linked_session_id', sessionId)
+    .in('status', ['scheduled', 'in_progress'])
+
   return { success: true }
 }
 

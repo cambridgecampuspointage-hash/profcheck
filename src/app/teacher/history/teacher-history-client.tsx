@@ -149,6 +149,12 @@ export default function TeacherHistoryClient({
                     </span>
                   </div>
                 </div>
+                {session.teacher_notes ? (
+                  <div style={{ marginTop: '0.75rem', padding: '0.75rem 0.9rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14 }}>
+                    <div style={{ color: '#94a3b8', fontSize: '0.76rem', marginBottom: '0.28rem', fontWeight: 700 }}>Note de séance</div>
+                    <div style={{ color: '#334155', fontSize: '0.84rem', whiteSpace: 'pre-wrap' }}>{session.teacher_notes}</div>
+                  </div>
+                ) : null}
               </div>
             )
           })}

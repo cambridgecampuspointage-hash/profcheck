@@ -1,20 +1,18 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import {
   createReceptionUser,
   createTeacher,
   deleteReceptionUser,
   deleteTeacher,
-  getTeacherBadgeSummaries,
-  getReceptionUsers,
-  getTeachers,
   resetReceptionPassword,
   resetTeacherPassword,
   updateReceptionUser,
   updateTeacher,
 } from '@/lib/actions'
-import type { ReceptionUser, Teacher, TeacherBadgeSummary } from '@/lib/types'
+import type { ReceptionUser, Teacher } from '@/lib/types'
 import { Edit2, KeyRound, Loader2, Plus, ShieldCheck, Trash2, UserCheck, UserX, X } from 'lucide-react'
 
 function formatTeacherRate(value?: number | null, fallback?: number | null) {
@@ -25,8 +23,8 @@ function formatTeacherRate(value?: number | null, fallback?: number | null) {
 }
 
 export default function TeachersPage() {
+  const supabase = useMemo(() => createClient(), [])
   const [teachers, setTeachers] = useState<Teacher[]>([])
-  const [badgeSummaries, setBadgeSummaries] = useState<TeacherBadgeSummary[]>([])
   const [receptionUsers, setReceptionUsers] = useState<ReceptionUser[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -40,14 +38,20 @@ export default function TeachersPage() {
 
   const fetchData = async () => {
     setLoading(true)
-    const [teacherData, receptionData, teacherBadges] = await Promise.all([
-      getTeachers(),
-      getReceptionUsers(),
-      getTeacherBadgeSummaries(),
+    const [teacherResponse, receptionResponse] = await Promise.all([
+      supabase
+        .from('teachers')
+        .select('*')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('profiles')
+        .select('id, full_name, email, phone, role, status, created_at')
+        .eq('role', 'reception')
+        .order('created_at', { ascending: false }),
     ])
-    setTeachers(teacherData as Teacher[])
-    setReceptionUsers(receptionData as ReceptionUser[])
-    setBadgeSummaries(teacherBadges as TeacherBadgeSummary[])
+
+    setTeachers((teacherResponse.data || []) as Teacher[])
+    setReceptionUsers((receptionResponse.data || []) as ReceptionUser[])
     setLoading(false)
   }
 
@@ -55,15 +59,20 @@ export default function TeachersPage() {
     let active = true
 
     async function loadData() {
-      const [teacherData, receptionData, teacherBadges] = await Promise.all([
-        getTeachers(),
-        getReceptionUsers(),
-        getTeacherBadgeSummaries(),
+      const [teacherResponse, receptionResponse] = await Promise.all([
+        supabase
+          .from('teachers')
+          .select('*')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('profiles')
+          .select('id, full_name, email, phone, role, status, created_at')
+          .eq('role', 'reception')
+          .order('created_at', { ascending: false }),
       ])
       if (!active) return
-      setTeachers(teacherData as Teacher[])
-      setReceptionUsers(receptionData as ReceptionUser[])
-      setBadgeSummaries(teacherBadges as TeacherBadgeSummary[])
+      setTeachers((teacherResponse.data || []) as Teacher[])
+      setReceptionUsers((receptionResponse.data || []) as ReceptionUser[])
       setLoading(false)
     }
 
@@ -72,7 +81,7 @@ export default function TeachersPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [supabase])
 
   const handleToggleStatus = async (teacher: Teacher) => {
     const newStatus = teacher.status === 'active' ? 'inactive' : 'active'
@@ -228,7 +237,6 @@ export default function TeachersPage() {
                       <th>Langues</th>
                       <th>Tarif 1h / 2h</th>
                       <th>Tarif 1h30 / 3h</th>
-                      <th>Badges</th>
                       <th>Statut</th>
                       <th>Actions</th>
                     </tr>
@@ -242,18 +250,6 @@ export default function TeachersPage() {
                         <td>{teacher.languages?.join(', ') || '-'}</td>
                         <td>{formatTeacherRate(teacher.hourly_rate_short, teacher.hourly_rate)} MAD/h</td>
                         <td>{formatTeacherRate(teacher.hourly_rate_long, teacher.hourly_rate)} MAD/h</td>
-                        <td>
-                          <div className="brand-badge-chip-list">
-                            {(badgeSummaries.find((summary) => summary.teacher_id === teacher.id)?.badges || []).slice(0, 2).map((badge) => (
-                              <span key={badge.id} className={`brand-mini-badge ${badge.tone}`}>
-                                {badge.name}
-                              </span>
-                            ))}
-                            {!((badgeSummaries.find((summary) => summary.teacher_id === teacher.id)?.badges || []).length) && (
-                              <span style={{ color: 'var(--brand-subtle)', fontSize: '0.78rem' }}>Aucun</span>
-                            )}
-                          </div>
-                        </td>
                         <td>
                           <span className={`brand-badge ${teacher.status === 'active' ? 'success' : 'danger'}`}>
                             {teacher.status === 'active' ? 'Actif' : 'Inactif'}

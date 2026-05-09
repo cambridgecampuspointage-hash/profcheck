@@ -43,6 +43,91 @@ export interface Center {
   created_at: string
 }
 
+export interface AppSettings {
+  id: 'global'
+  auto_close_active_sessions: boolean
+  auto_close_after_minutes: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Student {
+  id: string
+  center_id: string | null
+  full_name: string
+  phone: string | null
+  parent_name: string | null
+  parent_phone: string | null
+  email: string | null
+  payment_due_date: string | null
+  access_status: 'allowed' | 'blocked'
+  access_block_reason: string | null
+  status: 'active' | 'inactive'
+  created_at: string
+  updated_at: string
+  center?: Center | null
+}
+
+export interface StudentClass {
+  id: string
+  center_id: string
+  teacher_id: string | null
+  name: string
+  level: string | null
+  status: 'active' | 'inactive'
+  created_at: string
+  updated_at: string
+  center?: Center | null
+  teacher?: Pick<Teacher, 'id' | 'full_name'> | null
+}
+
+export interface StudentClassMember {
+  id: string
+  class_id: string
+  student_id: string
+  joined_at: string
+  student?: Student | null
+  class?: StudentClass | null
+}
+
+export interface StudentAttendance {
+  id: string
+  student_id: string
+  class_id: string
+  planned_session_id: string | null
+  attendance_date: string
+  status: 'present' | 'absent' | 'late' | 'excused'
+  marked_at: string
+  marked_by_user_id: string | null
+  source: 'qr' | 'teacher' | 'admin' | 'reception'
+  signature_data_url: string | null
+  notes: string | null
+  student?: Student | null
+  class?: StudentClass | null
+}
+
+export interface StudentCheckinToken {
+  id: string
+  class_id: string
+  planned_session_id: string | null
+  token: string
+  expires_at: string
+  is_active: boolean
+  created_at: string
+}
+
+export interface StudentPaymentRecord {
+  id: string
+  student_id: string
+  paid_at: string
+  amount: number | null
+  period_months: number
+  next_due_date: string
+  notes: string | null
+  created_by: string | null
+  created_at: string
+}
+
 export interface Room {
   id: string
   center_id: string
@@ -76,6 +161,7 @@ export interface AttendanceSession {
   applied_hourly_rate: number | null
   payable_amount: number | null
   signature_data_url: string | null
+  teacher_notes: string | null
   start_latitude: number
   start_longitude: number
   end_latitude: number | null

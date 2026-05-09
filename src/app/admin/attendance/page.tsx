@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getAttendanceSessions, getCorrectionRequests, getRooms, getTeachers, reviewCorrectionRequest } from '@/lib/actions'
+import { closeAttendanceSessionManually, getAttendanceSessions, getCorrectionRequests, getRooms, getTeachers, reviewCorrectionRequest } from '@/lib/actions'
 import { formatDate, formatDateTime, formatTime, minutesToHoursMinutes, sessionTypeLabel } from '@/lib/utils'
 import type { AttendanceCorrectionRequest, AttendanceSession, Teacher, Room } from '@/lib/types'
 import { CheckCircle2, Eye, Filter, Loader2, MessageSquareWarning, XCircle } from 'lucide-react'
@@ -21,6 +21,7 @@ export default function AttendancePage() {
   const [correctionRequests, setCorrectionRequests] = useState<AttendanceCorrectionRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [reviewingId, setReviewingId] = useState<string | null>(null)
+  const [closingSessionId, setClosingSessionId] = useState<string | null>(null)
   const [signatureSession, setSignatureSession] = useState<AttendanceSession | null>(null)
   const [filters, setFilters] = useState({
     teacherId: '',
@@ -124,6 +125,24 @@ export default function AttendancePage() {
         )
       )
     }
+  }
+
+  const closeSession = async (session: AttendanceSession) => {
+    const teacherName = (session.teacher as unknown as { full_name?: string })?.full_name || 'ce professeur'
+    const confirmed = window.confirm(`Clôturer maintenant la session active de ${teacherName} ?`)
+
+    if (!confirmed) return
+
+    setClosingSessionId(session.id)
+    const result = await closeAttendanceSessionManually(session.id)
+    setClosingSessionId(null)
+
+    if (result.error) {
+      window.alert(result.error)
+      return
+    }
+
+    await fetchSessions()
   }
 
   return (
@@ -277,8 +296,10 @@ export default function AttendancePage() {
                       <th>Durée réelle</th>
                       <th>Durée payée</th>
                       <th>Signature</th>
+                      <th>Note séance</th>
                       <th>Statut</th>
                       <th>Raison</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -308,8 +329,30 @@ export default function AttendancePage() {
                               <span style={{ color: 'var(--brand-subtle)', fontSize: '0.8rem' }}>Aucune</span>
                             )}
                           </td>
+                          <td style={{ maxWidth: 260 }}>
+                            {session.teacher_notes ? (
+                              <div style={{ fontSize: '0.84rem', color: 'var(--brand-navy)', whiteSpace: 'pre-wrap' }}>
+                                {session.teacher_notes}
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--brand-subtle)', fontSize: '0.8rem' }}>—</span>
+                            )}
+                          </td>
                           <td>{getStatusBadge(session.status)}</td>
                           <td style={{ color: '#b24534', fontSize: '0.84rem' }}>{session.fraud_reason || '-'}</td>
+                          <td>
+                            {session.status === 'active' ? (
+                              <button
+                                className="brand-staff-btn brand-staff-btn-secondary"
+                                disabled={closingSessionId === session.id}
+                                onClick={() => closeSession(session)}
+                              >
+                                {closingSessionId === session.id ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Clôture...</> : 'Clôturer'}
+                              </button>
+                            ) : (
+                              <span style={{ color: 'var(--brand-subtle)', fontSize: '0.82rem' }}>—</span>
+                            )}
+                          </td>
                         </tr>
                       )
                     })}

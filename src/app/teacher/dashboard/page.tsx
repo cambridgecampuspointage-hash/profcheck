@@ -1,13 +1,36 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { Calendar, CalendarDays, Clock3, History, Play, QrCode } from 'lucide-react'
+import { Award, Calendar, CalendarDays, Clock3, History, Play, QrCode, Sparkles, Star, Trophy } from 'lucide-react'
 import { getTeacherBadges, getTeacherStats, getUserProfile } from '@/lib/actions'
+import type { TeacherBadge } from '@/lib/types'
 
 const statItems = [
   { label: "Aujourd'hui", icon: <Clock3 size={20} />, iconColor: '#1b2d5b', bgColor: '#eef1f8' },
   { label: 'Semaine', icon: <Calendar size={20} />, iconColor: '#ba7517', bgColor: '#faeeda' },
   { label: 'Mois', icon: <CalendarDays size={20} />, iconColor: '#0f6e56', bgColor: '#e1f5ee' },
 ]
+
+function badgeVariant(badge: TeacherBadge) {
+  if (badge.tone === 'gold') return 'golden-kitty'
+  if (badge.tone === 'emerald') return 'product-of-the-week'
+  if (badge.tone === 'rose') return 'product-of-the-month'
+  return 'product-of-the-day'
+}
+
+function badgeIcon(badge: TeacherBadge) {
+  const variant = badgeVariant(badge)
+  if (variant === 'golden-kitty') return <Trophy size={15} />
+  if (variant === 'product-of-the-week') return <Sparkles size={15} />
+  if (variant === 'product-of-the-month') return <Award size={15} />
+  return <Star size={15} />
+}
+
+function badgeToneClass(tone: TeacherBadge['tone']) {
+  if (tone === 'gold') return 'warning'
+  if (tone === 'emerald') return 'success'
+  if (tone === 'rose') return 'danger'
+  return 'info'
+}
 
 export default async function TeacherDashboard() {
   const profile = await getUserProfile()
@@ -90,11 +113,29 @@ export default async function TeacherDashboard() {
             Continue tes sessions pour debloquer tes premieres distinctions.
           </div>
         ) : (
-          <div className="brand-badge-grid">
+          <div className="brand-list">
             {badges.map((badge) => (
-              <div key={badge.id} className={`brand-creative-badge ${badge.tone}`}>
-                <div className="brand-creative-badge-title">{badge.name}</div>
-                <div className="brand-creative-badge-copy">{badge.description}</div>
+              <div
+                key={badge.id}
+                className="brand-list-row"
+                style={{ alignItems: 'flex-start', paddingBlock: '0.9rem' }}
+              >
+                <div
+                  className="brand-list-avatar"
+                  style={{
+                    background: badge.tone === 'gold' ? '#faeeda' : badge.tone === 'emerald' ? '#e1f5ee' : badge.tone === 'rose' ? '#fef2f2' : '#e6f1fb',
+                    color: badge.tone === 'gold' ? '#ba7517' : badge.tone === 'emerald' ? '#0f6e56' : badge.tone === 'rose' ? '#9b1c1c' : '#185fa5',
+                  }}
+                >
+                  {badgeIcon(badge)}
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="brand-list-title">{badge.name}</div>
+                  <div className="brand-list-subtitle">{badge.description}</div>
+                </div>
+                <span className={`brand-badge ${badgeToneClass(badge.tone)}`}>
+                  Distinction
+                </span>
               </div>
             ))}
           </div>
