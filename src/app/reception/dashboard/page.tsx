@@ -73,7 +73,7 @@ export default async function ReceptionDashboard() {
               return (
                 <Link
                   key={room.id}
-                  href={`/admin/qr-display/${room.id}`}
+                  href={`/reception/qr-display/${room.id}`}
                   className="brand-card-soft"
                   style={{ padding: '1rem', textDecoration: 'none', color: 'inherit' }}
                 >

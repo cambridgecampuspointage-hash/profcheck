@@ -276,7 +276,7 @@ export async function generateQrToken(roomId: string) {
 
   const { user, role } = await getSessionContext()
   if (!user) return { error: 'Non authentifié' }
-  if (role !== 'admin') return { error: 'Accès refusé' }
+  if (role !== 'admin' && role !== 'reception') return { error: 'Accès refusé' }
 
   const admin = createAdminClient()
 
