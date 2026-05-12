@@ -1,5 +1,6 @@
 import type { AttendanceSession, Room, Teacher } from '@/lib/types'
 import type { PlannedSession } from '@/types/planning'
+import type { SessionStatus } from '@/types/planning'
 import type {
   DayKpi,
   LateTeacher,
@@ -78,6 +79,22 @@ function parseTimeToMinutes(time: string) {
   return ((hours || 0) * 60) + (minutes || 0)
 }
 
+function getEffectiveSessionStatus(session: PlannedSession, now = new Date()): SessionStatus {
+  if (session.status !== 'scheduled') return session.status
+
+  const todayKey = toDateKey(now)
+  if (session.scheduled_date < todayKey) {
+    return 'absent'
+  }
+
+  if (session.scheduled_date > todayKey) {
+    return 'scheduled'
+  }
+
+  const plannedEndMinutes = parseTimeToMinutes(session.start_time) + session.duration_minutes
+  return currentTimeMinutes() >= plannedEndMinutes ? 'absent' : 'scheduled'
+}
+
 function getTeacherName(session: PlannedSession | AttendanceSession) {
   return session.teacher?.full_name || 'Professeur inconnu'
 }
@@ -148,18 +165,18 @@ function buildComparison(
     }
   }
 
-  const currentEffectiveSessions = plannedSessions.filter((session) => session.status !== 'cancelled')
-  const previousEffectiveSessions = previousData.plannedSessions.filter((session) => session.status !== 'cancelled')
+  const currentEffectiveSessions = plannedSessions.filter((session) => getEffectiveSessionStatus(session) !== 'cancelled')
+  const previousEffectiveSessions = previousData.plannedSessions.filter((session) => getEffectiveSessionStatus(session) !== 'cancelled')
   const currentCompletedHours = currentEffectiveSessions
-    .filter((session) => session.status === 'completed')
+    .filter((session) => getEffectiveSessionStatus(session) === 'completed')
     .reduce((sum, session) => sum + session.duration_minutes, 0) / 60
   const previousCompletedHours = previousEffectiveSessions
-    .filter((session) => session.status === 'completed')
+    .filter((session) => getEffectiveSessionStatus(session) === 'completed')
     .reduce((sum, session) => sum + session.duration_minutes, 0) / 60
   const currentPayroll = attendanceSessions.reduce((sum, session) => sum + getAttendancePay(session), 0)
   const previousPayroll = previousData.attendanceSessions.reduce((sum, session) => sum + getAttendancePay(session), 0)
-  const currentAbsences = currentEffectiveSessions.filter((session) => session.status === 'absent').length
-  const previousAbsences = previousEffectiveSessions.filter((session) => session.status === 'absent').length
+  const currentAbsences = currentEffectiveSessions.filter((session) => getEffectiveSessionStatus(session) === 'absent').length
+  const previousAbsences = previousEffectiveSessions.filter((session) => getEffectiveSessionStatus(session) === 'absent').length
   const currentOneToOne = currentEffectiveSessions.filter((session) => session.session_type === 'one_to_one').length
   const previousOneToOne = previousEffectiveSessions.filter((session) => session.session_type === 'one_to_one').length
 
@@ -193,7 +210,7 @@ function getSessionStartDifferenceMinutes(session: PlannedSession) {
 }
 
 function buildTeacherByDaySeries(sessions: PlannedSession[], keys: string[]) {
-  return keys.map((key) => sessions.filter((session) => session.scheduled_date === key && session.status === 'completed').length)
+  return keys.map((key) => sessions.filter((session) => session.scheduled_date === key && getEffectiveSessionStatus(session) === 'completed').length)
 }
 
 export function computeTodayKpis(plannedSessions: PlannedSession[], attendanceSessions: AttendanceSession[]): TodayKpis {
@@ -203,7 +220,7 @@ export function computeTodayKpis(plannedSessions: PlannedSession[], attendanceSe
   const todayAttendance = attendanceSessions.filter((session) => toDateKey(new Date(session.created_at)) === todayKey)
   const linkedSessionIds = new Set(todayPlanned.map((session) => session.linked_session_id).filter(Boolean))
   const lateTeachers: LateTeacher[] = todayPlanned
-    .filter((session) => session.status === 'scheduled')
+    .filter((session) => getEffectiveSessionStatus(session) === 'scheduled')
     .map((session) => {
       const minutesLate = nowMinutes - parseTimeToMinutes(session.start_time)
       return {
@@ -217,9 +234,9 @@ export function computeTodayKpis(plannedSessions: PlannedSession[], attendanceSe
     .sort((left, right) => right.minutes_late - left.minutes_late)
 
   const sessionsInProgress = todayPlanned.filter((session) => session.status === 'in_progress')
-  const sessionsAbsent = todayPlanned.filter((session) => session.status === 'absent').length
+  const sessionsAbsent = todayPlanned.filter((session) => getEffectiveSessionStatus(session) === 'absent').length
   const sessionsScheduledRemaining = todayPlanned.filter(
-    (session) => session.status === 'scheduled' && parseTimeToMinutes(session.start_time) > nowMinutes,
+    (session) => getEffectiveSessionStatus(session) === 'scheduled' && parseTimeToMinutes(session.start_time) > nowMinutes,
   ).length
   const sessionsOutOfPlanning = todayAttendance.filter((session) => !linkedSessionIds.has(session.id)).length
 
@@ -243,19 +260,19 @@ export function computeWeekKpis(plannedSessions: PlannedSession[], weekStart: Da
     }
   })
 
-  const effectiveSessions = plannedSessions.filter((session) => session.status !== 'cancelled')
+  const effectiveSessions = plannedSessions.filter((session) => getEffectiveSessionStatus(session) !== 'cancelled')
   const totalPlanned = effectiveSessions.length
-  const totalCompleted = effectiveSessions.filter((session) => session.status === 'completed').length
-  const totalAbsent = effectiveSessions.filter((session) => session.status === 'absent').length
+  const totalCompleted = effectiveSessions.filter((session) => getEffectiveSessionStatus(session) === 'completed').length
+  const totalAbsent = effectiveSessions.filter((session) => getEffectiveSessionStatus(session) === 'absent').length
   const totalCancelled = plannedSessions.filter((session) => session.status === 'cancelled').length
   const byDay: DayKpi[] = weekDays.map((day) => {
     const daySessions = plannedSessions.filter((session) => session.scheduled_date === day.date)
     return {
       date: day.date,
       label: day.label,
-      planned: daySessions.filter((session) => session.status !== 'cancelled').length,
-      completed: daySessions.filter((session) => session.status === 'completed').length,
-      absent: daySessions.filter((session) => session.status === 'absent').length,
+      planned: daySessions.filter((session) => getEffectiveSessionStatus(session) !== 'cancelled').length,
+      completed: daySessions.filter((session) => getEffectiveSessionStatus(session) === 'completed').length,
+      absent: daySessions.filter((session) => getEffectiveSessionStatus(session) === 'absent').length,
     }
   })
 
@@ -274,12 +291,14 @@ export function computeWeekKpis(plannedSessions: PlannedSession[], weekStart: Da
       byDay: new Array(weekDays.length).fill(0),
     }
 
-    if (session.status !== 'cancelled') existing.planned += 1
-    if (session.status === 'completed') existing.completed += 1
-    if (session.status === 'absent') existing.absent += 1
+    const status = getEffectiveSessionStatus(session)
+
+    if (status !== 'cancelled') existing.planned += 1
+    if (status === 'completed') existing.completed += 1
+    if (status === 'absent') existing.absent += 1
 
     const dayIndex = weekDays.findIndex((day) => day.date === session.scheduled_date)
-    if (dayIndex >= 0 && session.status === 'completed') {
+    if (dayIndex >= 0 && status === 'completed') {
       existing.byDay[dayIndex] += 1
     }
 
@@ -288,8 +307,8 @@ export function computeWeekKpis(plannedSessions: PlannedSession[], weekStart: Da
 
   const byTeacher = Array.from(teacherMap.values())
     .map((teacher) => {
-      const teacherSessions = plannedSessions.filter((session) => session.teacher_id === teacher.teacher_id && session.status !== 'cancelled')
-      const attendedSessions = teacherSessions.filter((session) => ['completed', 'in_progress'].includes(session.status) && session.linked_session?.start_time)
+      const teacherSessions = plannedSessions.filter((session) => session.teacher_id === teacher.teacher_id && getEffectiveSessionStatus(session) !== 'cancelled')
+      const attendedSessions = teacherSessions.filter((session) => ['completed', 'in_progress'].includes(getEffectiveSessionStatus(session)) && session.linked_session?.start_time)
       const onTimeSessions = attendedSessions.filter((session) => {
         const difference = getSessionStartDifferenceMinutes(session)
         return difference !== null && difference <= 15
@@ -333,17 +352,17 @@ export function computeMonthKpis(
     return parts.year === year && parts.month === month + 1
   })
 
-  const effectivePlanned = currentMonthPlanned.filter((session) => session.status !== 'cancelled')
+  const effectivePlanned = currentMonthPlanned.filter((session) => getEffectiveSessionStatus(session) !== 'cancelled')
   const totalPlannedHours = round(effectivePlanned.reduce((sum, session) => sum + session.duration_minutes, 0) / 60, 1)
   const totalCompletedHours = round(
     effectivePlanned
-      .filter((session) => session.status === 'completed')
+      .filter((session) => getEffectiveSessionStatus(session) === 'completed')
       .reduce((sum, session) => sum + session.duration_minutes, 0) / 60,
     1,
   )
   const totalAbsentHours = round(
     effectivePlanned
-      .filter((session) => session.status === 'absent')
+      .filter((session) => getEffectiveSessionStatus(session) === 'absent')
       .reduce((sum, session) => sum + session.duration_minutes, 0) / 60,
     1,
   )
@@ -358,8 +377,8 @@ export function computeMonthKpis(
 
   const totalSessionCount = effectivePlanned.length
   const totalOneToOne = effectivePlanned.filter((session) => session.session_type === 'one_to_one').length
-  const completedCount = effectivePlanned.filter((session) => session.status === 'completed').length
-  const absenceCount = effectivePlanned.filter((session) => session.status === 'absent').length
+  const completedCount = effectivePlanned.filter((session) => getEffectiveSessionStatus(session) === 'completed').length
+  const absenceCount = effectivePlanned.filter((session) => getEffectiveSessionStatus(session) === 'absent').length
   const comparison = buildComparison(currentMonthPlanned, currentMonthAttendance, previousData)
   const sparklineKeys = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(year, month, index + 1)
@@ -370,9 +389,9 @@ export function computeMonthKpis(
     .map((teacher) => {
       const teacherPlanned = effectivePlanned.filter((session) => session.teacher_id === teacher.id)
       const teacherAttendance = currentMonthAttendance.filter((session) => session.teacher_id === teacher.id)
-      const teacherCompleted = teacherPlanned.filter((session) => session.status === 'completed')
-      const teacherAbsent = teacherPlanned.filter((session) => session.status === 'absent')
-      const attendedSessions = teacherPlanned.filter((session) => ['completed', 'in_progress'].includes(session.status) && session.linked_session?.start_time)
+      const teacherCompleted = teacherPlanned.filter((session) => getEffectiveSessionStatus(session) === 'completed')
+      const teacherAbsent = teacherPlanned.filter((session) => getEffectiveSessionStatus(session) === 'absent')
+      const attendedSessions = teacherPlanned.filter((session) => ['completed', 'in_progress'].includes(getEffectiveSessionStatus(session)) && session.linked_session?.start_time)
       const lateCount = attendedSessions.filter((session) => {
         const difference = getSessionStartDifferenceMinutes(session)
         return difference !== null && difference > 15
@@ -436,4 +455,8 @@ export function computeMonthKpis(
     byRoom,
     vsLastMonth: comparison,
   }
+}
+
+export function getPlannedSessionDisplayStatus(session: PlannedSession): SessionStatus {
+  return getEffectiveSessionStatus(session)
 }

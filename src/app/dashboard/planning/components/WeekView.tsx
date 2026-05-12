@@ -180,14 +180,16 @@ export function WeekView({
                           </div>
                         </td>
                         <td>
-                          {session.status === 'scheduled' ? (
+                          {session.status === 'scheduled' || session.status === 'completed' ? (
                             <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                               <button className="btn btn-secondary btn-sm" onClick={() => onOverride(session)}>
                                 Modifier
                               </button>
-                              <button className="btn btn-secondary btn-sm" onClick={() => onCancel(session)}>
-                                Annuler
-                              </button>
+                              {session.status === 'scheduled' ? (
+                                <button className="btn btn-secondary btn-sm" onClick={() => onCancel(session)}>
+                                  Annuler
+                                </button>
+                              ) : null}
                               <button className="btn btn-secondary btn-sm" style={{ borderColor: '#fecaca', color: '#b91c1c' }} onClick={() => onDelete(session)}>
                                 Supprimer
                               </button>

@@ -766,6 +766,100 @@ export async function getTeacherPlannedSessions(): Promise<PlannedSession[]> {
   })) as PlannedSession[])
 }
 
+export async function getTeacherActiveSessionRoster(): Promise<{
+  activeSessionId: string
+  plannedSessionId: string
+  classId: string
+  className: string
+  students: Array<{
+    id: string
+    full_name: string
+    status: 'active' | 'inactive'
+    access_status: 'allowed' | 'blocked'
+    attendance_status: 'present' | 'absent' | 'late' | 'excused' | null
+    attendance_source: 'qr' | 'teacher' | 'admin' | 'reception' | null
+  }>
+} | null> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'teacher') return null
+
+  const admin = createAdminClient()
+  const { data: teacher } = await admin
+    .from('teachers')
+    .select('id')
+    .eq('user_id', user.id)
+    .single()
+
+  if (!teacher) return null
+
+  const { data: activeSession } = await admin
+    .from('attendance_sessions')
+    .select('id')
+    .eq('teacher_id', teacher.id)
+    .eq('status', 'active')
+    .maybeSingle()
+
+  if (!activeSession) return null
+
+  const { data: plannedSession } = await admin
+    .from('planned_sessions')
+    .select('id, class_id, class:student_classes(id, name)')
+    .eq('linked_session_id', activeSession.id)
+    .maybeSingle()
+
+  const classRow = Array.isArray(plannedSession?.class) ? plannedSession.class[0] : plannedSession?.class
+  if (!plannedSession?.class_id || !classRow?.id) return null
+
+  const attendanceDate = formatDateKey(new Date())
+  const [membershipsRes, attendanceRes] = await Promise.all([
+    admin
+      .from('student_class_members')
+      .select('student:students(id, full_name, status, access_status)')
+      .eq('class_id', plannedSession.class_id),
+    admin
+      .from('student_attendance')
+      .select('student_id, status, source')
+      .eq('class_id', plannedSession.class_id)
+      .eq('attendance_date', attendanceDate),
+  ])
+
+  if (membershipsRes.error || attendanceRes.error) return null
+
+  const attendanceMap = new Map(
+    (attendanceRes.data || []).map((row) => [
+      row.student_id as string,
+      {
+        status: row.status as 'present' | 'absent' | 'late' | 'excused',
+        source: row.source as 'qr' | 'teacher' | 'admin' | 'reception',
+      },
+    ]),
+  )
+
+  const students = (membershipsRes.data || [])
+    .map((membership) => Array.isArray(membership.student) ? membership.student[0] : membership.student)
+    .filter((student): student is { id: string; full_name: string; status: 'active' | 'inactive'; access_status: 'allowed' | 'blocked' } => Boolean(student))
+    .sort((left, right) => left.full_name.localeCompare(right.full_name, 'fr'))
+    .map((student) => {
+      const attendance = attendanceMap.get(student.id)
+      return {
+        id: student.id,
+        full_name: student.full_name,
+        status: student.status,
+        access_status: student.access_status,
+        attendance_status: attendance?.status || null,
+        attendance_source: attendance?.source || null,
+      }
+    })
+
+  return {
+    activeSessionId: activeSession.id,
+    plannedSessionId: plannedSession.id,
+    classId: plannedSession.class_id,
+    className: classRow.name,
+    students,
+  }
+}
+
 export async function getMyTeacherReportData(dateFrom: string, dateTo: string): Promise<{ data?: TeacherReportData; error?: string }> {
   const { user, role } = await getSessionContext()
   if (!user || role !== 'teacher') return { error: 'Accès refusé' }
@@ -1672,6 +1766,20 @@ export async function updateStudent(studentId: string, payload: Partial<StudentP
   return { success: true }
 }
 
+export async function deleteStudent(studentId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('students')
+    .delete()
+    .eq('id', studentId)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
 export async function setStudentAccess(studentId: string, accessStatus: 'allowed' | 'blocked', reason?: string | null) {
   const { user, role } = await getSessionContext()
   if (!user || role !== 'admin') return { error: 'Accès refusé' }
@@ -1814,6 +1922,72 @@ export async function markStudentPresentForToday(payload: {
       marked_by_user_id: user.id,
       source: 'admin',
       notes: 'Présence ajoutée manuellement par l’administration',
+    }, {
+      onConflict: 'student_id,class_id,attendance_date',
+    })
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function markStudentPresentForTeacher(payload: {
+  student_id: string
+  class_id: string
+}) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'teacher') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const attendanceDate = formatDateKey(new Date())
+
+  const { data: teacher } = await admin
+    .from('teachers')
+    .select('id')
+    .eq('user_id', user.id)
+    .single()
+
+  if (!teacher) return { error: 'Profil professeur non trouvé.' }
+
+  const { data: activeSession } = await admin
+    .from('attendance_sessions')
+    .select('id')
+    .eq('teacher_id', teacher.id)
+    .eq('status', 'active')
+    .maybeSingle()
+
+  if (!activeSession) return { error: 'Aucune séance active.' }
+
+  const { data: plannedSession } = await admin
+    .from('planned_sessions')
+    .select('id, class_id, teacher_id')
+    .eq('linked_session_id', activeSession.id)
+    .maybeSingle()
+
+  if (!plannedSession || plannedSession.teacher_id !== teacher.id || plannedSession.class_id !== payload.class_id) {
+    return { error: 'Séance ou classe non autorisée.' }
+  }
+
+  const { data: membership } = await admin
+    .from('student_class_members')
+    .select('id')
+    .eq('class_id', payload.class_id)
+    .eq('student_id', payload.student_id)
+    .maybeSingle()
+
+  if (!membership) return { error: 'Étudiant non lié à cette classe.' }
+
+  const { error } = await admin
+    .from('student_attendance')
+    .upsert({
+      student_id: payload.student_id,
+      class_id: payload.class_id,
+      planned_session_id: plannedSession.id,
+      attendance_date: attendanceDate,
+      status: 'present',
+      marked_at: new Date().toISOString(),
+      marked_by_user_id: user.id,
+      source: 'teacher',
+      notes: 'Présence ajoutée manuellement par le professeur',
     }, {
       onConflict: 'student_id,class_id,attendance_date',
     })

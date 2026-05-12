@@ -1,9 +1,9 @@
 'use client'
 
-import { useMemo } from 'react'
-import { Activity, AlertTriangle, CalendarClock, MapPinned } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Activity, AlertTriangle, CalendarClock, MapPinned, X } from 'lucide-react'
 import type { AttendanceSession } from '@/lib/types'
-import { computeTodayKpis } from '@/lib/kpis/computeAdminKpis'
+import { computeTodayKpis, getPlannedSessionDisplayStatus } from '@/lib/kpis/computeAdminKpis'
 import type { PlannedSession } from '@/types/planning'
 import { StatusBadge } from '@/app/dashboard/planning/components/StatusBadge'
 import { KpiCard } from './KpiCard'
@@ -14,6 +14,37 @@ function durationLabel(minutes: number) {
   if (minutes === 120) return '2h'
   if (minutes === 180) return '3h'
   return `${minutes} min`
+}
+
+function todayDismissKey() {
+  return `dismissed_today_panels_${new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Casablanca' })}`
+}
+
+function DismissButton({ onClick, color }: { onClick: () => void; color: string }) {
+  return (
+    <button
+      type="button"
+      aria-label="Masquer cette notification"
+      onClick={onClick}
+      style={{
+        position: 'absolute',
+        top: 14,
+        right: 14,
+        width: 32,
+        height: 32,
+        borderRadius: 999,
+        border: '1px solid currentColor',
+        background: '#FFFFFF',
+        color,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'pointer',
+      }}
+    >
+      <X size={16} />
+    </button>
+  )
 }
 
 export function TodayPanel({
@@ -35,6 +66,21 @@ export function TodayPanel({
 
   const linkedIds = new Set(plannedSessions.map((session) => session.linked_session_id).filter(Boolean))
   const outOfPlanning = attendanceSessions.filter((session) => !linkedIds.has(session.id))
+  const [dismissedSections, setDismissedSections] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return {}
+    try {
+      const raw = localStorage.getItem(todayDismissKey())
+      return raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
+    } catch {
+      return {}
+    }
+  })
+
+  const dismissSection = (key: string) => {
+    const next = { ...dismissedSections, [key]: true }
+    setDismissedSections(next)
+    localStorage.setItem(todayDismissKey(), JSON.stringify(next))
+  }
 
   return (
     <div style={{ display: 'grid', gap: '1.2rem' }}>
@@ -104,16 +150,18 @@ export function TodayPanel({
         </section>
       ) : null}
 
-      {kpis.lateTeachers.length > 0 ? (
+      {kpis.lateTeachers.length > 0 && !dismissedSections.late ? (
         <section
           id="today-late"
           style={{
+            position: 'relative',
             background: '#FFF7F7',
             border: '1px solid #F3C4C4',
             borderRadius: 22,
             padding: '1.1rem',
           }}
         >
+          <DismissButton onClick={() => dismissSection('late')} color="#9B1C1C" />
           <div style={{ color: '#9B1C1C', fontWeight: 800, marginBottom: '0.85rem' }}>Profs en retard</div>
           <div style={{ display: 'grid', gap: '0.55rem' }}>
             {kpis.lateTeachers.map((teacher) => (
@@ -125,16 +173,18 @@ export function TodayPanel({
         </section>
       ) : null}
 
-      {outOfPlanning.length > 0 ? (
+      {outOfPlanning.length > 0 && !dismissedSections.outOfPlanning ? (
         <section
           id="today-out-of-planning"
           style={{
+            position: 'relative',
             background: '#FFF8ED',
             border: '1px solid #F0D5A8',
             borderRadius: 22,
             padding: '1.1rem',
           }}
         >
+          <DismissButton onClick={() => dismissSection('outOfPlanning')} color="#A25A06" />
           <div style={{ color: '#A25A06', fontWeight: 800, marginBottom: '0.85rem' }}>Sessions hors planning</div>
           <div style={{ display: 'grid', gap: '0.55rem' }}>
             {outOfPlanning.map((session) => (
@@ -163,10 +213,12 @@ export function TodayPanel({
           </div>
         ) : (
           <div style={{ display: 'grid', gap: '0.65rem' }}>
-            {timeline.map((session) => (
+            {timeline.map((session) => {
+              const displayStatus = getPlannedSessionDisplayStatus(session)
+              return (
               <div
                 key={session.id}
-                id={session.status === 'absent' ? 'today-absent' : undefined}
+                id={displayStatus === 'absent' ? 'today-absent' : undefined}
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '90px minmax(160px, 1.2fr) minmax(120px, 1fr) 100px 120px auto',
@@ -174,8 +226,8 @@ export function TodayPanel({
                   alignItems: 'center',
                   padding: '0.85rem 0.95rem',
                   borderRadius: 18,
-                  background: session.status === 'in_progress' ? 'rgba(27, 45, 91, 0.08)' : '#FAF8F3',
-                  border: session.status === 'in_progress' ? '1px solid rgba(27, 45, 91, 0.18)' : '1px solid transparent',
+                  background: displayStatus === 'in_progress' ? 'rgba(27, 45, 91, 0.08)' : '#FAF8F3',
+                  border: displayStatus === 'in_progress' ? '1px solid rgba(27, 45, 91, 0.18)' : '1px solid transparent',
                 }}
               >
                 <div style={{ color: '#1B2D5B', fontWeight: 800 }}>{session.start_time.slice(0, 5)}</div>
@@ -185,9 +237,10 @@ export function TodayPanel({
                 <div style={{ color: '#6E6254', fontWeight: 700 }}>
                   {session.session_type === 'one_to_one' ? 'One-to-one' : 'Groupe'}
                 </div>
-                <StatusBadge status={session.status} />
+                <StatusBadge status={displayStatus} />
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>

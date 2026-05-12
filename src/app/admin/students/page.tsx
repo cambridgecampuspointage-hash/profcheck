@@ -9,6 +9,7 @@ import { getStudentPaymentState, isStudentEffectivelyBlocked } from '@/lib/stude
 import {
   createStudent,
   createStudentClass,
+  deleteStudent,
   markStudentPresentForToday,
   recordStudentPayment,
   setStudentAccess,
@@ -16,7 +17,7 @@ import {
   updateStudentClass,
 } from '@/lib/actions'
 import type { Center, Student, StudentClass, StudentPaymentRecord, Teacher } from '@/lib/types'
-import { GraduationCap, Plus, QrCode, ShieldAlert, ShieldCheck, Users, X, Edit2, CalendarClock, CreditCard, CheckCircle2, Download } from 'lucide-react'
+import { GraduationCap, Plus, QrCode, ShieldAlert, ShieldCheck, Users, X, Edit2, CalendarClock, CreditCard, CheckCircle2, Download, Trash2 } from 'lucide-react'
 
 type StudentMembershipRow = {
   class_id: string
@@ -47,6 +48,7 @@ export default function AdminStudentsPage() {
   const [editingStudent, setEditingStudent] = useState<Student | null>(null)
   const [paymentStudent, setPaymentStudent] = useState<Student | null>(null)
   const [updatingStudentId, setUpdatingStudentId] = useState<string | null>(null)
+  const [deletingStudentId, setDeletingStudentId] = useState<string | null>(null)
   const [markingKey, setMarkingKey] = useState<string | null>(null)
   const [downloadingClassId, setDownloadingClassId] = useState<string | null>(null)
 
@@ -180,6 +182,22 @@ export default function AdminStudentsPage() {
     }
 
     window.alert('Présence enregistrée pour aujourd’hui.')
+  }
+
+  const handleDeleteStudent = async (student: Student) => {
+    const confirmation = window.prompt(`Pour supprimer l'étudiant "${student.full_name}", tapez SUPPRIMER`)
+    if (confirmation !== 'SUPPRIMER') return
+
+    setDeletingStudentId(student.id)
+    const result = await deleteStudent(student.id)
+    setDeletingStudentId(null)
+
+    if ('error' in result && result.error) {
+      window.alert(result.error)
+      return
+    }
+
+    void loadData()
   }
 
   const handleDownloadAttendanceSheet = async (studentClass: StudentClass) => {
@@ -381,6 +399,15 @@ export default function AdminStudentsPage() {
                           }}
                         >
                           <CreditCard size={14} /> Paiement
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          style={{ borderColor: '#fecaca', color: '#b91c1c' }}
+                          disabled={deletingStudentId === student.id}
+                          onClick={() => void handleDeleteStudent(student)}
+                        >
+                          <Trash2 size={14} />
+                          {deletingStudentId === student.id ? 'Suppression...' : 'Supprimer'}
                         </button>
                       </div>
                     </div>
