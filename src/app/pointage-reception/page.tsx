@@ -195,7 +195,7 @@ export default function ReceptionClockingPage() {
   }
 
   if (loading) {
-    return <PageState label="Chargement du pointage réception..." />
+    return <PageState label="Chargement du pointage..." />
   }
 
   const canClockIn = Boolean(schedule && !attendance?.clock_in)
@@ -231,13 +231,13 @@ export default function ReceptionClockingPage() {
       <div style={containerStyle}>
         <div>
           <Link href="/reception/dashboard" style={backLinkStyle}>
-            ← Retour à l&apos;accueil réception
+            ← Retour au tableau de bord
           </Link>
         </div>
 
         <header style={heroStyle}>
           <div>
-            <div style={eyebrowStyle}>Pointage réception</div>
+            <div style={eyebrowStyle}>Administration</div>
             <h1 style={titleStyle}>
               Bonjour{profile?.full_name ? `, ${profile.full_name.split(' ')[0]}` : ''}
             </h1>

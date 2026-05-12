@@ -26,7 +26,7 @@ export default async function ReceptionDashboard() {
             </Link>
           </div>
         )}
-        <h1 className="brand-page-title">Accueil réception</h1>
+        <h1 className="brand-page-title">Tableau de bord</h1>
         <p className="brand-page-subtitle">
           Bienvenue{profile?.full_name ? `, ${profile.full_name}` : ''}. Affiche rapidement les QR codes des salles.
         </p>
