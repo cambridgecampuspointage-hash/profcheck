@@ -270,6 +270,7 @@ export async function generateQrToken(roomId: string) {
         room_id: roomId,
         expires_at: new Date(Date.now() + 60000).toISOString(),
         access_code: generateAccessCode(token),
+        gps_verification_enabled: true,
       },
     }
   }
@@ -320,6 +321,7 @@ export async function generateQrToken(roomId: string) {
       room_id: qrToken.room_id,
       expires_at: qrToken.expires_at,
       access_code: generateAccessCode(qrToken.token),
+      gps_verification_enabled: room.center?.gps_verification_enabled !== false,
     },
   }
 }
@@ -353,6 +355,12 @@ export async function resolveAttendanceCode(code: string) {
     return { error: 'Code invalide ou expiré.' }
   }
 
+  const { data: center } = await admin
+    .from('centers')
+    .select('gps_verification_enabled')
+    .eq('id', match.center_id)
+    .maybeSingle()
+
   return {
     data: {
       token: match.token,
@@ -360,6 +368,7 @@ export async function resolveAttendanceCode(code: string) {
       room_id: match.room_id,
       expires_at: match.expires_at,
       access_code: normalizedCode,
+      gps_verification_enabled: center?.gps_verification_enabled !== false,
     },
   }
 }

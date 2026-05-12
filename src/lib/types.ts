@@ -228,6 +228,7 @@ export interface QrPayload {
   room_id: string
   expires_at: string
   access_code?: string
+  gps_verification_enabled?: boolean
 }
 
 export interface ScanRequest {

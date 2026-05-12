@@ -150,7 +150,16 @@ export default function ScanPage() {
     setStep('processing')
 
     try {
-      const position = await getCurrentPosition()
+      const requiresGps = qrPayload.gps_verification_enabled !== false
+      const position = requiresGps
+        ? await getCurrentPosition()
+        : ({
+            coords: {
+              latitude: 0,
+              longitude: 0,
+              accuracy: 0,
+            },
+          } as GeolocationPosition)
       const res = await validateAttendanceScan(
         qrPayload.token,
         qrPayload.center_id,
@@ -186,7 +195,16 @@ export default function ScanPage() {
     setStep('processing')
 
     try {
-      const position = await getCurrentPosition()
+      const requiresGps = qrPayload.gps_verification_enabled !== false
+      const position = requiresGps
+        ? await getCurrentPosition()
+        : ({
+            coords: {
+              latitude: 0,
+              longitude: 0,
+              accuracy: 0,
+            },
+          } as GeolocationPosition)
       const res = await validateAttendanceScan(
         qrPayload.token,
         qrPayload.center_id,
