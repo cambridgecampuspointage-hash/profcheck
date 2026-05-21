@@ -7,7 +7,12 @@ import { createClient } from '@/lib/supabase/client'
 import { DayAttendanceCard } from './components/DayAttendanceCard'
 import { MonthSummaryTable } from './components/MonthSummaryTable'
 import { WorkScheduleForm } from './components/WorkScheduleForm'
-import { computeReceptionMonthSummary, findScheduleForDate } from '@/lib/reception/computeReceptionKpis'
+import {
+  computeDayAttendanceKpis,
+  computeReceptionMonthSummary,
+  findScheduleForDate,
+  minutesToLabel,
+} from '@/lib/reception/computeReceptionKpis'
 import type {
   ReceptionProfile,
   StaffAttendance,
@@ -44,6 +49,11 @@ function formatMonthLabel(base: Date) {
   })
 }
 
+function formatWorkDays(days: number[]) {
+  const labels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam']
+  return days.map((day) => labels[day] || '?').join(' • ')
+}
+
 export default function ReceptionAdminDashboardPage() {
   const router = useRouter()
   const supabase = useMemo(() => createClient(), [])
@@ -57,6 +67,7 @@ export default function ReceptionAdminDashboardPage() {
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false)
   const [editingSchedule, setEditingSchedule] = useState<StaffSchedule | null>(null)
   const [saving, setSaving] = useState(false)
+  const [dayFilter, setDayFilter] = useState<'all' | 'anomalies' | 'present' | 'missing' | 'absent'>('all')
   const [error, setError] = useState<string | null>(null)
 
   const loadData = useCallback(async (monthDate: Date) => {
@@ -215,13 +226,103 @@ export default function ReceptionAdminDashboardPage() {
     const userSchedule = findScheduleForDate(userSchedules, selectedDateObject)
     const attendance =
       attendances.find((entry) => entry.user_id === user.id && entry.date === selectedDate) || null
+    const kpis = computeDayAttendanceKpis(userSchedule, attendance)
 
     return {
       user,
       schedule: userSchedule,
       attendance,
+      kpis,
     }
   })
+  const todayOverview = {
+    activeUsers: receptionUsers.length,
+    plannedUsers: dayCards.filter((entry) => entry.schedule).length,
+    clockedUsers: dayCards.filter((entry) => entry.attendance?.clock_in).length,
+    anomalyCount: dayCards.reduce((total, entry) => {
+      const late = entry.attendance?.late_minutes || 0
+      const early = entry.attendance?.early_leave_minutes || 0
+      const breakOvertime = entry.attendance?.break_overtime_minutes || 0
+      const missingClockOut = entry.attendance?.clock_in && !entry.attendance?.clock_out ? 1 : 0
+      const absent = entry.attendance?.status === 'absent' ? 1 : 0
+      return total + Number(late > 0) + Number(early > 0) + Number(breakOvertime > 0) + Number(Boolean(missingClockOut)) + absent
+    }, 0),
+  }
+  const priorityAlerts = dayCards.flatMap((entry) => {
+    const anomalies = entry.kpis.anomalies.map((anomaly) => ({
+      id: `${entry.user.id}-${anomaly.type}`,
+      userLabel: entry.user.full_name || entry.user.email || 'Réceptionniste',
+      title: anomaly.title,
+      message: anomaly.message,
+      severity: anomaly.severity,
+      action:
+        anomaly.type === 'absence'
+          ? 'Vérifier la justification ou ajouter une absence validée.'
+          : anomaly.type === 'missing_clock_out'
+            ? 'Corriger la sortie ou compléter le pointage.'
+            : anomaly.type === 'long_break'
+              ? 'Contrôler la durée réelle de pause.'
+              : 'Vérifier l’explication et consigner la note RH.',
+    }))
+
+    if (!entry.schedule && !entry.attendance) {
+      return [{
+        id: `${entry.user.id}-unscheduled`,
+        userLabel: entry.user.full_name || entry.user.email || 'Réceptionniste',
+        title: 'Aucun horaire prévu',
+        message: 'Cette réceptionniste apparaît sans planning ni pointage pour la date sélectionnée.',
+        severity: 'warning' as const,
+        action: 'Créer un horaire si elle devait être présente.',
+      }]
+    }
+
+    return anomalies
+  })
+
+  const filteredDayCards = dayCards.filter((entry) => {
+    if (dayFilter === 'all') return true
+    if (dayFilter === 'anomalies') return entry.kpis.anomalies.length > 0
+    if (dayFilter === 'present') return entry.kpis.clockedIn
+    if (dayFilter === 'missing') return Boolean(entry.attendance?.clock_in && !entry.attendance?.clock_out)
+    if (dayFilter === 'absent') return entry.attendance?.status === 'absent'
+    return true
+  })
+
+  const monthTotals = monthSummary.reduce(
+    (acc, row) => {
+      acc.workedDays += row.workedDays
+      acc.totalPresentMinutes += row.totalPresentMinutes
+      acc.absenceCount += row.absenceCount
+      acc.lateCount += row.lateCount
+      acc.longBreakCount += row.longBreakCount
+      acc.missingClockOutCount += row.missingClockOutCount
+      return acc
+    },
+    {
+      workedDays: 0,
+      totalPresentMinutes: 0,
+      absenceCount: 0,
+      lateCount: 0,
+      longBreakCount: 0,
+      missingClockOutCount: 0,
+    },
+  )
+  const bestPerformer = monthSummary.reduce((best, row) => {
+    const score = row.lateCount + row.absenceCount + row.longBreakCount + row.earlyLeaveCount + row.missingClockOutCount
+    if (!best) return { row, score }
+    return score < best.score ? { row, score } : best
+  }, null as null | { row: (typeof monthSummary)[number]; score: number })
+  const riskPerformer = monthSummary.reduce((worst, row) => {
+    const score = row.lateCount + (row.absenceCount * 2) + row.longBreakCount + row.earlyLeaveCount + row.missingClockOutCount
+    if (!worst) return { row, score }
+    return score > worst.score ? { row, score } : worst
+  }, null as null | { row: (typeof monthSummary)[number]; score: number })
+  const punctualityRate = monthTotals.workedDays > 0
+    ? Math.max(0, Math.round(((monthTotals.workedDays - monthTotals.lateCount) / monthTotals.workedDays) * 100))
+    : 100
+  const presenceAverage = monthSummary.length > 0
+    ? Math.round(monthTotals.totalPresentMinutes / Math.max(monthSummary.length, 1))
+    : 0
 
   if (authorized === null || loading) {
     return <PageState label="Chargement du suivi réception..." />
@@ -260,6 +361,53 @@ export default function ReceptionAdminDashboardPage() {
 
         {error ? <div style={errorStyle}>{error}</div> : null}
 
+        <section style={overviewGridStyle}>
+          <OverviewTile label="Réceptionnistes actives" value={String(todayOverview.activeUsers)} hint="profils suivis" />
+          <OverviewTile label="Présences prévues" value={String(todayOverview.plannedUsers)} hint={`pour le ${selectedDate.split('-').reverse().join('/')}`} />
+          <OverviewTile label="Pointages saisis" value={String(todayOverview.clockedUsers)} hint="arrivées enregistrées" />
+          <OverviewTile label="Anomalies du jour" value={String(todayOverview.anomalyCount)} hint="retards, pauses, absences" tone={todayOverview.anomalyCount > 0 ? 'warning' : 'default'} />
+        </section>
+
+        <section style={cardStyle}>
+          <div style={sectionHeaderStyle}>
+            <div>
+              <div style={sectionTitleStyle}>Alertes prioritaires</div>
+              <div style={sectionHintStyle}>Ce qui demande une action admin immédiate sur la date sélectionnée</div>
+            </div>
+            <div style={alertCountStyle}>
+              {priorityAlerts.length} alerte(s)
+            </div>
+          </div>
+
+          {priorityAlerts.length === 0 ? (
+            <div style={successStateStyle}>
+              Aucune anomalie bloquante détectée. La journée est propre pour l’instant.
+            </div>
+          ) : (
+            <div style={alertListStyle}>
+              {priorityAlerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  style={{
+                    ...alertCardStyle,
+                    borderColor: alert.severity === 'critical' ? 'rgba(229,62,62,0.2)' : '#F2D08A',
+                    background: alert.severity === 'critical' ? 'rgba(229,62,62,0.06)' : '#FFF9EF',
+                  }}
+                >
+                  <div style={{ display: 'grid', gap: '0.25rem' }}>
+                    <div style={{ color: '#1B2D5B', fontWeight: 800 }}>{alert.userLabel}</div>
+                    <div style={{ color: alert.severity === 'critical' ? '#E53E3E' : '#8A5B10', fontWeight: 800 }}>
+                      {alert.title}
+                    </div>
+                    <div style={{ color: '#6F6253' }}>{alert.message}</div>
+                  </div>
+                  <div style={alertActionStyle}>{alert.action}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
         <section style={cardStyle}>
           <div style={sectionHeaderStyle}>
             <div>
@@ -275,15 +423,24 @@ export default function ReceptionAdminDashboardPage() {
               {schedules.map((schedule) => (
                 <div key={schedule.id} style={scheduleCardStyle}>
                   <div>
-                    <div style={{ color: '#1B2D5B', fontWeight: 800 }}>
+                    <div style={{ color: '#1B2D5B', fontWeight: 800, fontSize: '1.05rem' }}>
                       {schedule.profile?.full_name || schedule.profile?.email || 'Réceptionniste'}
                     </div>
+                    <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', marginTop: '0.55rem' }}>
+                      <span style={inlinePillStyle}>{schedule.work_days.length} jour(s) / semaine</span>
+                      <span style={inlinePillStyle}>{schedule.max_break_minutes} min pause max</span>
+                    </div>
                     <div style={{ color: '#8B7D6B', marginTop: '0.3rem' }}>
-                      {schedule.expected_start.slice(0, 5)} → {schedule.expected_end.slice(0, 5)} · Pause max {schedule.max_break_minutes} min
+                      {schedule.expected_start.slice(0, 5)} → {schedule.expected_end.slice(0, 5)}
                     </div>
                     <div style={{ color: '#8B7D6B', marginTop: '0.3rem', fontSize: '0.88rem' }}>
-                      {schedule.work_days.map((day) => ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'][day] || '?').join(' • ')}
+                      {formatWorkDays(schedule.work_days)}
                     </div>
+                    {schedule.profile?.email ? (
+                      <div style={{ color: '#A08F7A', marginTop: '0.35rem', fontSize: '0.82rem' }}>
+                        {schedule.profile.email}
+                      </div>
+                    ) : null}
                   </div>
                   <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap' }}>
                     <button
@@ -342,11 +499,19 @@ export default function ReceptionAdminDashboardPage() {
             </div>
           </div>
 
-          {dayCards.length === 0 ? (
+          <div style={filterBarStyle}>
+            <FilterChip label="Tout voir" active={dayFilter === 'all'} onClick={() => setDayFilter('all')} />
+            <FilterChip label="Anomalies" active={dayFilter === 'anomalies'} onClick={() => setDayFilter('anomalies')} />
+            <FilterChip label="Présentes" active={dayFilter === 'present'} onClick={() => setDayFilter('present')} />
+            <FilterChip label="Sortie manquante" active={dayFilter === 'missing'} onClick={() => setDayFilter('missing')} />
+            <FilterChip label="Absences" active={dayFilter === 'absent'} onClick={() => setDayFilter('absent')} />
+          </div>
+
+          {filteredDayCards.length === 0 ? (
             <div style={emptyStyle}>Aucune réceptionniste active trouvée.</div>
           ) : (
             <div style={dayGridStyle}>
-              {dayCards.map((entry) => (
+              {filteredDayCards.map((entry) => (
                 <div key={entry.user.id} style={{ display: 'grid', gap: '0.65rem' }}>
                   <DayAttendanceCard
                     title={entry.user.full_name || entry.user.email || 'Réceptionniste'}
@@ -378,6 +543,37 @@ export default function ReceptionAdminDashboardPage() {
               <div style={sectionHintStyle}>Retards, absences, pauses longues et temps présent</div>
             </div>
           </div>
+          <div style={insightGridStyle}>
+            <InsightTile
+              label="Ponctualité"
+              value={`${punctualityRate}%`}
+              hint="jours pointés sans retard"
+            />
+            <InsightTile
+              label="Présence moyenne"
+              value={presenceAverage > 0 ? minutesToLabel(presenceAverage) : '0 min'}
+              hint="moyenne par réceptionniste"
+            />
+            <InsightTile
+              label="Référence du mois"
+              value={bestPerformer?.row.full_name || '—'}
+              hint="profil le plus régulier"
+            />
+            <InsightTile
+              label="À surveiller"
+              value={riskPerformer?.row.full_name || '—'}
+              hint="profil avec le plus d’anomalies"
+              tone="warning"
+            />
+          </div>
+          <div style={monthSummaryHeadlineStyle}>
+            <span>{monthTotals.workedDays} jour(s) pointé(s)</span>
+            <span>{monthTotals.lateCount} retard(s)</span>
+            <span>{monthTotals.absenceCount} absence(s)</span>
+            <span>{monthTotals.longBreakCount} pause(s) longue(s)</span>
+            <span>{monthTotals.missingClockOutCount} sortie(s) manquante(s)</span>
+            <span>{monthTotals.totalPresentMinutes > 0 ? `${minutesToLabel(monthTotals.totalPresentMinutes)} de présence` : 'Aucune présence cumulée'}</span>
+          </div>
           <MonthSummaryTable rows={monthSummary} />
         </section>
       </div>
@@ -403,6 +599,94 @@ function PageState({ label }: { label: string }) {
   return (
     <div style={pageStyle}>
       <div style={{ ...containerStyle, color: '#1B2D5B', fontWeight: 700 }}>{label}</div>
+    </div>
+  )
+}
+
+function OverviewTile({
+  label,
+  value,
+  hint,
+  tone = 'default',
+}: {
+  label: string
+  value: string
+  hint: string
+  tone?: 'default' | 'warning'
+}) {
+  return (
+    <div
+      style={{
+        ...cardStyle,
+        padding: '1rem 1.1rem',
+        background: tone === 'warning' ? '#FFF9EF' : '#FFFFFF',
+        borderColor: tone === 'warning' ? '#F2D08A' : '#E8E2D5',
+      }}
+    >
+      <div style={{ color: '#8B7D6B', fontSize: '0.82rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        {label}
+      </div>
+      <div style={{ color: '#1B2D5B', fontSize: '1.9rem', fontWeight: 900, marginTop: '0.45rem' }}>{value}</div>
+      <div style={{ color: '#8B7D6B', marginTop: '0.3rem', fontSize: '0.9rem' }}>{hint}</div>
+    </div>
+  )
+}
+
+function FilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        border: active ? '1px solid #1B2D5B' : '1px solid #E8E2D5',
+        background: active ? '#1B2D5B' : '#FFFFFF',
+        color: active ? '#FFFFFF' : '#1B2D5B',
+        borderRadius: 999,
+        padding: '0.55rem 0.85rem',
+        fontWeight: 800,
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function InsightTile({
+  label,
+  value,
+  hint,
+  tone = 'default',
+}: {
+  label: string
+  value: string
+  hint: string
+  tone?: 'default' | 'warning'
+}) {
+  return (
+    <div
+      style={{
+        border: `1px solid ${tone === 'warning' ? '#F2D08A' : '#E8E2D5'}`,
+        background: tone === 'warning' ? '#FFF9EF' : '#FCFBF8',
+        borderRadius: 20,
+        padding: '0.95rem 1rem',
+      }}
+    >
+      <div style={{ color: '#8B7D6B', fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        {label}
+      </div>
+      <div style={{ color: '#1B2D5B', fontWeight: 900, fontSize: '1.1rem', marginTop: '0.4rem' }}>
+        {value}
+      </div>
+      <div style={{ color: '#8B7D6B', marginTop: '0.3rem', fontSize: '0.88rem' }}>{hint}</div>
     </div>
   )
 }
@@ -467,11 +751,24 @@ const cardStyle = {
   padding: '1.15rem',
 }
 
+const overviewGridStyle = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+  gap: '1rem',
+}
+
 const sectionHeaderStyle = {
   display: 'flex',
   justifyContent: 'space-between',
   gap: '1rem',
   alignItems: 'center',
+  flexWrap: 'wrap' as const,
+  marginBottom: '1rem',
+}
+
+const filterBarStyle = {
+  display: 'flex',
+  gap: '0.65rem',
   flexWrap: 'wrap' as const,
   marginBottom: '1rem',
 }
@@ -534,6 +831,16 @@ const scheduleCardStyle = {
   alignItems: 'center',
 }
 
+const inlinePillStyle = {
+  border: '1px solid #E8E2D5',
+  background: '#FFFFFF',
+  color: '#1B2D5B',
+  borderRadius: 999,
+  padding: '0.25rem 0.55rem',
+  fontSize: '0.78rem',
+  fontWeight: 700,
+}
+
 const dayGridStyle = {
   display: 'grid',
   gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
@@ -545,6 +852,15 @@ const emptyStyle = {
   padding: '0.35rem 0',
 }
 
+const successStateStyle = {
+  border: '1px solid rgba(15,110,86,0.18)',
+  background: 'rgba(15,110,86,0.08)',
+  color: '#0F6E56',
+  borderRadius: 18,
+  padding: '0.95rem 1rem',
+  fontWeight: 700,
+}
+
 const errorStyle = {
   border: '1px solid rgba(229,62,62,0.18)',
   background: 'rgba(229,62,62,0.08)',
@@ -552,6 +868,53 @@ const errorStyle = {
   borderRadius: 18,
   padding: '0.9rem 1rem',
   fontWeight: 700,
+}
+
+const monthSummaryHeadlineStyle = {
+  display: 'flex',
+  gap: '0.75rem',
+  flexWrap: 'wrap' as const,
+  marginBottom: '1rem',
+  color: '#8B7D6B',
+  fontWeight: 700,
+  fontSize: '0.9rem',
+}
+
+const alertCountStyle = {
+  border: '1px solid #E8E2D5',
+  background: '#FCFBF8',
+  color: '#1B2D5B',
+  borderRadius: 999,
+  padding: '0.55rem 0.8rem',
+  fontWeight: 800,
+}
+
+const alertListStyle = {
+  display: 'grid',
+  gap: '0.8rem',
+}
+
+const alertCardStyle = {
+  border: '1px solid #E8E2D5',
+  borderRadius: 18,
+  padding: '0.95rem 1rem',
+  display: 'grid',
+  gap: '0.7rem',
+}
+
+const alertActionStyle = {
+  color: '#1B2D5B',
+  fontWeight: 700,
+  background: 'rgba(255,255,255,0.7)',
+  borderRadius: 14,
+  padding: '0.65rem 0.8rem',
+}
+
+const insightGridStyle = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+  gap: '0.8rem',
+  marginBottom: '1rem',
 }
 
 const monthPillStyle = {

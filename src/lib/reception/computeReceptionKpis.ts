@@ -186,6 +186,11 @@ export function computeReceptionMonthSummary(
         missingClockOutCount: 0,
         totalPresentMinutes: 0,
         averagePresentMinutes: 0,
+        lateDetails: [],
+        absenceDetails: [],
+        longBreakDetails: [],
+        earlyLeaveDetails: [],
+        missingClockOutDetails: [],
       })
     }
   }
@@ -196,11 +201,48 @@ export function computeReceptionMonthSummary(
 
     row.workedDays += attendance.clock_in ? 1 : 0
     row.totalPresentMinutes += attendance.total_present_minutes || 0
-    row.lateCount += attendance.late_minutes > 0 ? 1 : 0
-    row.absenceCount += attendance.status === 'absent' ? 1 : 0
-    row.longBreakCount += attendance.break_overtime_minutes > 0 ? 1 : 0
-    row.earlyLeaveCount += attendance.early_leave_minutes > 0 ? 1 : 0
-    row.missingClockOutCount += attendance.clock_in && !attendance.clock_out ? 1 : 0
+    if (attendance.late_minutes > 0) {
+      row.lateCount += 1
+      row.lateDetails.push({
+        date: attendance.date,
+        minutes: attendance.late_minutes,
+        label: `${attendance.late_minutes} min de retard`,
+      })
+    }
+
+    if (attendance.status === 'absent') {
+      row.absenceCount += 1
+      row.absenceDetails.push({
+        date: attendance.date,
+        label: 'Absence constatée',
+      })
+    }
+
+    if (attendance.break_overtime_minutes > 0) {
+      row.longBreakCount += 1
+      row.longBreakDetails.push({
+        date: attendance.date,
+        minutes: attendance.break_overtime_minutes,
+        label: `${attendance.break_overtime_minutes} min de dépassement`,
+      })
+    }
+
+    if (attendance.early_leave_minutes > 0) {
+      row.earlyLeaveCount += 1
+      row.earlyLeaveDetails.push({
+        date: attendance.date,
+        minutes: attendance.early_leave_minutes,
+        label: `${attendance.early_leave_minutes} min de départ anticipé`,
+      })
+    }
+
+    if (attendance.clock_in && !attendance.clock_out) {
+      row.missingClockOutCount += 1
+      row.missingClockOutDetails.push({
+        date: attendance.date,
+        label: 'Sortie non pointée',
+      })
+    }
   }
 
   return Array.from(summaryMap.values())

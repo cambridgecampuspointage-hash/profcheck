@@ -22,6 +22,10 @@ export function DayAttendanceCard({
 }) {
   const kpis = computeDayAttendanceKpis(schedule, attendance)
   const tone = toneColors[kpis.statusTone]
+  const startDay = attendance?.clock_in ? extractTime(attendance.clock_in) : 'Non pointé'
+  const endDay = attendance?.clock_out ? extractTime(attendance.clock_out) : attendance?.clock_in ? 'En cours' : 'Non pointé'
+  const breakStart = attendance?.break_start ? extractTime(attendance.break_start) : 'Aucune'
+  const breakEnd = attendance?.break_end ? extractTime(attendance.break_end) : attendance?.break_start ? 'En cours' : 'Aucune'
 
   return (
     <div style={cardStyle}>
@@ -47,6 +51,10 @@ export function DayAttendanceCard({
         <InfoBlock label="Présence réelle" value={kpis.actualRange} />
         <InfoBlock label="Pause" value={kpis.breakLabel} />
         <InfoBlock label="Retard / Départ" value={`${kpis.lateMinutes} min / ${kpis.earlyLeaveMinutes} min`} />
+        <InfoBlock label="Arrivée" value={startDay} />
+        <InfoBlock label="Départ" value={endDay} />
+        <InfoBlock label="Début pause" value={breakStart} />
+        <InfoBlock label="Fin pause" value={breakEnd} />
       </div>
 
       {kpis.anomalies.length > 0 ? (
@@ -70,6 +78,18 @@ export function DayAttendanceCard({
       ) : null}
     </div>
   )
+}
+
+function extractTime(value: string) {
+  if (/^\d{2}:\d{2}/.test(value)) return value.slice(0, 5)
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleTimeString('fr-FR', {
+    timeZone: 'Africa/Casablanca',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
 }
 
 function InfoBlock({ label, value }: { label: string; value: string }) {

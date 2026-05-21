@@ -89,6 +89,17 @@ export interface ReceptionMonthSummaryRow {
   missingClockOutCount: number
   totalPresentMinutes: number
   averagePresentMinutes: number
+  lateDetails: ReceptionMonthSummaryDetail[]
+  absenceDetails: ReceptionMonthSummaryDetail[]
+  longBreakDetails: ReceptionMonthSummaryDetail[]
+  earlyLeaveDetails: ReceptionMonthSummaryDetail[]
+  missingClockOutDetails: ReceptionMonthSummaryDetail[]
+}
+
+export interface ReceptionMonthSummaryDetail {
+  date: string
+  minutes?: number
+  label: string
 }
 
 export interface WorkSchedulePayload {
