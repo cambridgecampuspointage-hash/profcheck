@@ -2264,3 +2264,25 @@ async function logAttempt(
     rejection_reason: rejectionReason,
   })
 }
+
+// ─── ADMIN - DELETE ───────────────────────────────────────────────────────────
+
+export async function deleteAttendanceSession(sessionId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('attendance_sessions').delete().eq('id', sessionId)
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function deleteStudentPaymentRecord(recordId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin.from('student_payment_records').delete().eq('id', recordId)
+  if (error) return { error: error.message }
+  return { success: true }
+}

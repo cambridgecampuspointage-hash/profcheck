@@ -15,6 +15,7 @@ import {
   setStudentAccess,
   updateStudent,
   updateStudentClass,
+  deleteStudentPaymentRecord,
 } from '@/lib/actions'
 import type { Center, Student, StudentClass, StudentPaymentRecord, Teacher } from '@/lib/types'
 import { GraduationCap, Plus, QrCode, ShieldAlert, ShieldCheck, Users, X, Edit2, CalendarClock, CreditCard, CheckCircle2, Download, Trash2 } from 'lucide-react'
@@ -822,6 +823,23 @@ function StudentPaymentModal({
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null)
+
+  const handleDeleteRecord = async (recordId: string) => {
+    const confirmed = window.confirm('Êtes-vous sûr de vouloir supprimer cet historique de paiement ?')
+    if (!confirmed) return
+
+    setDeletingRecordId(recordId)
+    const result = await deleteStudentPaymentRecord(recordId)
+    setDeletingRecordId(null)
+
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+
+    onSaved()
+  }
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
@@ -908,10 +926,20 @@ function StudentPaymentModal({
                       Prochaine échéance : {formatDate(record.next_due_date)}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.45rem', color: '#64748b', fontSize: '0.82rem' }}>
+                  <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.45rem', color: '#64748b', fontSize: '0.82rem', alignItems: 'center' }}>
                     <span>{record.period_months} mois</span>
                     {record.amount !== null ? <span>{record.amount.toFixed(2)} MAD</span> : null}
                     {record.notes ? <span>{record.notes}</span> : null}
+                    <div style={{ flexGrow: 1 }} />
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      style={{ padding: '0.2rem 0.4rem', color: '#b91c1c', borderColor: '#fecaca', background: 'white' }}
+                      disabled={deletingRecordId === record.id}
+                      onClick={() => void handleDeleteRecord(record.id)}
+                      title="Supprimer ce paiement"
+                    >
+                      {deletingRecordId === record.id ? '...' : <Trash2 size={13} />}
+                    </button>
                   </div>
                 </div>
               ))}
