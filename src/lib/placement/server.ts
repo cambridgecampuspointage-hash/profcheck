@@ -90,7 +90,7 @@ export async function startEnglishQuest(payload: {
     .order('completed_at', { ascending: false })
 
   if (existingAttemptsError) {
-    return { error: existingAttemptsError.message as const }
+    return { error: existingAttemptsError.message }
   }
 
   const existingAttempt = ((existingAttempts || []) as PlacementAttempt[]).find((attempt) => {
@@ -208,7 +208,7 @@ export async function recordEnglishQuestAnswer(payload: {
     })
 
   if (answerError) {
-    return { error: answerError.message as const }
+    return { error: answerError.message }
   }
 
   const { data: answers, error: answersError } = await admin
@@ -217,7 +217,7 @@ export async function recordEnglishQuestAnswer(payload: {
     .eq('attempt_id', payload.attemptId)
 
   if (answersError) {
-    return { error: answersError.message as const }
+    return { error: answersError.message }
   }
 
   const evaluation = evaluatePlacementAttempt({
@@ -238,7 +238,7 @@ export async function recordEnglishQuestAnswer(payload: {
     .eq('id', payload.attemptId)
 
   if (updateError) {
-    return { error: updateError.message as const }
+    return { error: updateError.message }
   }
 
   return {
@@ -289,7 +289,7 @@ export async function completeEnglishQuest(attemptId: string) {
   ])
 
   if (answersResult.error) {
-    return { error: answersResult.error.message as const }
+    return { error: answersResult.error.message }
   }
 
   const evaluation = evaluatePlacementAttempt({
@@ -317,7 +317,7 @@ export async function completeEnglishQuest(attemptId: string) {
     .eq('id', attemptId)
 
   if (updateAttemptError) {
-    return { error: updateAttemptError.message as const }
+    return { error: updateAttemptError.message }
   }
 
   if (typedAttempt.lead_id) {
