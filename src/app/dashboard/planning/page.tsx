@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { manuallyCompletePlannedSession } from '@/lib/actions'
 import type { Room, Teacher } from '@/lib/types'
 import { generateWeekSessions } from '@/lib/planning/generateWeekSessions'
 import { formatIsoDate, formatWeekLabel, getWeekDates, getWeekStart } from '@/lib/planning/dateUtils'
@@ -54,6 +55,7 @@ export default function PlanningPage() {
   const [showTemplateForm, setShowTemplateForm] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<ScheduleTemplate | null>(null)
   const [overrideSession, setOverrideSession] = useState<PlannedSession | null>(null)
+  const [processingSessionId, setProcessingSessionId] = useState<string | null>(null)
 
   const weekDates = useMemo(() => getWeekDates(currentWeekStart), [currentWeekStart])
 
@@ -368,6 +370,29 @@ export default function PlanningPage() {
     await fetchWeekSessions(currentWeekStart)
   }
 
+  const handleMarkSessionCompleted = async (session: PlannedSession) => {
+    const reason = window.prompt(
+      'Motif de la validation manuelle :',
+      'Séance effectuée sans pointage QR',
+    )
+
+    if (!reason?.trim()) return
+
+    setError('')
+    setProcessingSessionId(session.id)
+
+    const result = await manuallyCompletePlannedSession(session.id, reason.trim())
+
+    setProcessingSessionId(null)
+
+    if (result?.error) {
+      setError(result.error)
+      return
+    }
+
+    await fetchWeekSessions(currentWeekStart)
+  }
+
   return (
     <div className="page-enter" style={{ padding: '1.5rem', maxWidth: 1400, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
@@ -458,7 +483,9 @@ export default function PlanningPage() {
           onOverride={(session) => setOverrideSession(session)}
           onCancel={handleCancelSession}
           onDelete={handleDeleteSession}
+          onMarkCompleted={handleMarkSessionCompleted}
           loading={loading}
+          processingSessionId={processingSessionId}
         />
       ) : (
         <section className="brand-card">

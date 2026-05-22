@@ -2206,6 +2206,112 @@ export async function updateSessionStatus(
   return { success: true }
 }
 
+export async function manuallyCompletePlannedSession(
+  plannedSessionId: string,
+  note?: string,
+) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { data: plannedSession, error: plannedSessionError } = await admin
+    .from('planned_sessions')
+    .select(`
+      *,
+      teacher:teachers(hourly_rate, hourly_rate_short, hourly_rate_long)
+    `)
+    .eq('id', plannedSessionId)
+    .single()
+
+  if (plannedSessionError || !plannedSession) {
+    return { error: plannedSessionError?.message || 'Séance introuvable.' }
+  }
+
+  if (plannedSession.linked_session_id) {
+    return { error: 'Cette séance est déjà liée à un pointage existant.' }
+  }
+
+  if (!plannedSession.room_id) {
+    return { error: 'Impossible de compléter manuellement une séance sans salle assignée.' }
+  }
+
+  if (plannedSession.status === 'cancelled') {
+    return { error: 'Une séance annulée ne peut pas être complétée manuellement.' }
+  }
+
+  const teacher = plannedSession.teacher as TeacherRateSource | null
+  if (!teacher) {
+    return { error: 'Professeur introuvable pour cette séance.' }
+  }
+
+  const [year, month, day] = String(plannedSession.scheduled_date).split('-').map(Number)
+  const [startHours, startMinutes] = String(plannedSession.start_time).slice(0, 5).split(':').map(Number)
+  const durationMinutes = Number(plannedSession.duration_minutes || 0)
+
+  if (!year || !month || !day || !Number.isFinite(startHours) || !Number.isFinite(startMinutes) || durationMinutes <= 0) {
+    return { error: 'Données horaires invalides pour cette séance.' }
+  }
+
+  const startedAt = new Date(year, month - 1, day, startHours, startMinutes, 0, 0)
+  const endedAt = new Date(startedAt.getTime() + durationMinutes * 60000)
+  const appliedHourlyRate = getAppliedHourlyRate(teacher, durationMinutes)
+  const payableAmount = roundPayableAmount((durationMinutes / 60) * appliedHourlyRate)
+  const adminNote = (note || '').trim()
+  const teacherNotes = adminNote
+    ? `[Validation admin manuelle] ${adminNote}`
+    : '[Validation admin manuelle] Séance marquée complétée sans pointage QR.'
+
+  const { data: session, error: insertError } = await admin
+    .from('attendance_sessions')
+    .insert({
+      teacher_id: plannedSession.teacher_id,
+      center_id: plannedSession.campus_id,
+      room_id: plannedSession.room_id,
+      started_at: startedAt.toISOString(),
+      ended_at: endedAt.toISOString(),
+      duration_minutes: durationMinutes,
+      planned_duration_minutes: durationMinutes,
+      session_type: plannedSession.session_type === 'one_to_one' ? 'one_to_one' : 'standard',
+      applied_hourly_rate: appliedHourlyRate,
+      payable_amount: payableAmount,
+      teacher_notes: teacherNotes,
+      start_latitude: 0,
+      start_longitude: 0,
+      end_latitude: 0,
+      end_longitude: 0,
+      start_status: 'manual_admin',
+      end_status: 'manual_admin',
+      status: 'completed',
+    })
+    .select('id')
+    .single()
+
+  if (insertError || !session) {
+    return { error: insertError?.message || 'Création du pointage manuel impossible.' }
+  }
+
+  const { error: updateError } = await admin
+    .from('planned_sessions')
+    .update({
+      linked_session_id: session.id,
+      status: 'completed',
+      is_override: true,
+      override_reason: adminNote || 'Validation admin manuelle',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', plannedSessionId)
+
+  if (updateError) {
+    await admin
+      .from('attendance_sessions')
+      .delete()
+      .eq('id', session.id)
+    return { error: updateError.message }
+  }
+
+  return { success: true }
+}
+
 // ─── GET USER PROFILE ─────────────────────────────────────────────────────────
 
 export async function getUserProfile() {

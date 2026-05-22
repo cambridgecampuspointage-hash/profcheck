@@ -33,14 +33,18 @@ export function WeekView({
   onOverride,
   onCancel,
   onDelete,
+  onMarkCompleted,
   loading,
+  processingSessionId,
 }: {
   sessions: PlannedSession[]
   weekDates: Date[]
   onOverride: (session: PlannedSession) => void
   onCancel: (session: PlannedSession) => void
   onDelete: (session: PlannedSession) => void
+  onMarkCompleted: (session: PlannedSession) => void
   loading: boolean
+  processingSessionId?: string | null
 }) {
   return (
     <div style={{ display: 'grid', gap: '1rem' }}>
@@ -185,6 +189,15 @@ export function WeekView({
                               <button className="btn btn-secondary btn-sm" onClick={() => onOverride(session)}>
                                 Modifier
                               </button>
+                              {session.status === 'scheduled' && !session.linked_session ? (
+                                <button
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => onMarkCompleted(session)}
+                                  disabled={processingSessionId === session.id}
+                                >
+                                  {processingSessionId === session.id ? 'Validation...' : 'Compléter'}
+                                </button>
+                              ) : null}
                               {session.status === 'scheduled' ? (
                                 <button className="btn btn-secondary btn-sm" onClick={() => onCancel(session)}>
                                   Annuler
