@@ -369,7 +369,7 @@ export function LeadDetailClient({ leadId }: { leadId: string }) {
             {tasks.length === 0 ? (
               <div style={{ color: '#64748b' }}>Aucune relance planifiée.</div>
             ) : tasks.map((task) => {
-              const overdue = Boolean(referenceNow) && task.status === 'pending' && new Date(task.due_at).getTime() < new Date(referenceNow).getTime()
+              const overdue = referenceNow != null && task.status === 'pending' && new Date(task.due_at).getTime() < new Date(referenceNow).getTime()
               return (
                 <div key={task.id} style={{ border: '1px solid #e2e8f0', borderRadius: 14, padding: '0.9rem 1rem', background: overdue ? '#fff7ed' : '#fff' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', marginBottom: 6 }}>
