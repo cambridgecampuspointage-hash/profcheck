@@ -2495,7 +2495,7 @@ export async function updateCrmLead(leadId: string, payload: Partial<CrmLeadPayl
     .eq('id', leadId)
 
   if (error) return { error: error.message }
-  return { success: true, studentId: student.id }
+  return { success: true }
 }
 
 export async function addCrmLeadNote(leadId: string, note: string) {
