@@ -63,6 +63,8 @@ export default function TelegramSettingsPage() {
   const [preferences, setPreferences] = useState<Record<string, boolean>>(() => readPreferences())
   const [loadingTest, setLoadingTest] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(true)
+  const [retryingIds, setRetryingIds] = useState<string[]>([])
+  const [retryingAll, setRetryingAll] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [historyFilters, setHistoryFilters] = useState({
@@ -164,6 +166,51 @@ export default function TelegramSettingsPage() {
     setLoadingHistory(false)
   }
 
+  const retryFailedAlerts = async (ids: string[]) => {
+    if (ids.length === 0) return
+
+    setStatusMessage(null)
+    setErrorMessage(null)
+
+    const singleRetry = ids.length === 1
+    if (singleRetry) {
+      setRetryingIds(ids)
+    } else {
+      setRetryingAll(true)
+    }
+
+    try {
+      const response = await fetch('/api/alerts/test', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'retry_failed',
+          ids,
+        }),
+      })
+
+      const payload = (await response.json()) as {
+        ok: boolean
+        message?: string
+        error?: string
+      }
+
+      if (!payload.ok) {
+        setErrorMessage(payload.error || 'Impossible de relancer les alertes.')
+      } else {
+        setStatusMessage(payload.message || 'Relance effectuée.')
+        await loadHistory()
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Erreur réseau pendant la relance.')
+    } finally {
+      setRetryingIds([])
+      setRetryingAll(false)
+    }
+  }
+
   const sendTestMessage = async () => {
     setLoadingTest(true)
     setStatusMessage(null)
@@ -192,6 +239,8 @@ export default function TelegramSettingsPage() {
   if (authorized === null) {
     return <PageState label="Vérification des droits administrateur..." />
   }
+
+  const failedEntryIds = history.filter((entry) => !entry.sent_ok).map((entry) => entry.id)
 
   return (
     <div style={{ minHeight: '100vh', background: '#FAF8F3', padding: '2rem clamp(1rem, 2vw, 2rem)' }}>
@@ -356,11 +405,33 @@ export default function TelegramSettingsPage() {
             <div style={{ color: '#8B7D6B' }}>Aucune alerte envoyée pour le moment.</div>
           ) : (
             <>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                <button
+                  type="button"
+                  onClick={() => void loadHistory()}
+                  style={secondaryButtonStyle}
+                >
+                  Filtrer / recharger
+                </button>
+                <button
+                  type="button"
+                  disabled={retryingAll || failedEntryIds.length === 0}
+                  onClick={() => void retryFailedAlerts(failedEntryIds)}
+                  style={{
+                    ...primaryButtonStyle,
+                    opacity: retryingAll || failedEntryIds.length === 0 ? 0.6 : 1,
+                    cursor: retryingAll || failedEntryIds.length === 0 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {retryingAll ? 'Relance en cours...' : `Renvoyer les alertes en erreur (${failedEntryIds.length})`}
+                </button>
+              </div>
+
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid #E8E2D5' }}>
-                      {['Date', 'Heure', 'Type', 'Statut', 'Message'].map((header) => (
+                      {['Date', 'Heure', 'Type', 'Statut', 'Message', 'Actions'].map((header) => (
                         <th key={header} style={headerStyle}>{header}</th>
                       ))}
                     </tr>
@@ -394,20 +465,31 @@ export default function TelegramSettingsPage() {
                             </span>
                           </td>
                           <td style={cellStyle}>{truncateMessage(entry.sent_ok ? entry.message : entry.error_message || entry.message)}</td>
+                          <td style={cellStyle}>
+                            {!entry.sent_ok ? (
+                              <button
+                                type="button"
+                                onClick={() => void retryFailedAlerts([entry.id])}
+                                disabled={retryingAll || retryingIds.includes(entry.id)}
+                                style={{
+                                  ...secondaryButtonStyle,
+                                  padding: '0.55rem 0.8rem',
+                                  opacity: retryingAll || retryingIds.includes(entry.id) ? 0.6 : 1,
+                                  cursor: retryingAll || retryingIds.includes(entry.id) ? 'not-allowed' : 'pointer',
+                                }}
+                              >
+                                {retryingIds.includes(entry.id) ? 'Relance...' : 'Renvoyer'}
+                              </button>
+                            ) : (
+                              <span style={{ color: '#8B7D6B', fontWeight: 600 }}>—</span>
+                            )}
+                          </td>
                         </tr>
                       )
                     })}
                   </tbody>
                 </table>
               </div>
-
-                <button
-                  type="button"
-                  onClick={() => void loadHistory()}
-                  style={{ ...secondaryButtonStyle, marginTop: '1rem' }}
-                >
-                Filtrer / recharger
-                </button>
             </>
           )}
         </section>

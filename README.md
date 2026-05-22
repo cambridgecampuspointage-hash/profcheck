@@ -97,6 +97,7 @@ Voir aussi:
 
 - [DEPLOYMENT.md](./DEPLOYMENT.md)
 - [CLIENT_HANDOFF.md](./CLIENT_HANDOFF.md)
+- [USER_GUIDE.md](./USER_GUIDE.md)
 - [supabase/SETUP.md](./supabase/SETUP.md)
 
 ## Important
