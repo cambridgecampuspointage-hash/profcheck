@@ -1,4 +1,5 @@
 import type { jsPDF as JsPDFType } from 'jspdf'
+import { GState } from 'jspdf'
 
 export interface PlacementCertificateData {
   fullName: string
@@ -75,9 +76,9 @@ export async function generatePlacementCertificatePdf(data: PlacementCertificate
   if (logo) {
     try {
       doc.addImage(logo, 'PNG', 18, 8, 18, 18)
-      doc.setGState(new doc.GState({ opacity: 0.06 }))
+      doc.setGState(new GState({ opacity: 0.06 }))
       doc.addImage(logo, 'PNG', pageWidth / 2 - 42, 58, 84, 84)
-      doc.setGState(new doc.GState({ opacity: 1 }))
+      doc.setGState(new GState({ opacity: 1 }))
     } catch {
       // ignore image errors
     }
