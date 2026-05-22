@@ -5,6 +5,9 @@ import {
   sendTelegramMessage,
 } from './sendAlert'
 import {
+  buildCrmHotLeadMessage,
+  buildCrmPaymentOverdueMessage,
+  buildCrmTrialTomorrowMessage,
   buildDailySummaryMessage,
   buildOutOfPlanningMessage,
   buildStaffAbsentMessage,
@@ -259,6 +262,99 @@ export async function checkTeacherAlerts(
         alertsSent += 1
       }
     }
+  }
+
+  return alertsSent
+}
+
+export async function checkCrmAlerts(
+  supabase: SupabaseClient,
+  today: string,
+): Promise<number> {
+  let alertsSent = 0
+  const todayDate = new Date(`${today}T00:00:00`)
+  const tomorrow = new Date(todayDate)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const tomorrowKey = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
+  const staleThresholdIso = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+
+  const [hotLeadsResult, trialResult, paymentResult] = await Promise.all([
+    supabase
+      .from('crm_leads')
+      .select('id, parent_name, student_name, program_interest, status, last_contact_at')
+      .in('status', ['interested', 'trial_scheduled'])
+      .or(`last_contact_at.is.null,last_contact_at.lt.${staleThresholdIso}`),
+    supabase
+      .from('crm_leads')
+      .select('id, parent_name, student_name, trial_date')
+      .eq('status', 'trial_scheduled')
+      .gte('trial_date', `${tomorrowKey}T00:00:00`)
+      .lt('trial_date', `${tomorrowKey}T23:59:59`),
+    supabase
+      .from('crm_payment_followups')
+      .select('id, student:students(full_name, payment_due_date, parent_name), lead:crm_leads(parent_name)')
+      .in('status', ['overdue', 'blocked']),
+  ])
+
+  if (hotLeadsResult.error || trialResult.error || paymentResult.error) {
+    console.error('[telegram] checkCrmAlerts:', hotLeadsResult.error?.message || trialResult.error?.message || paymentResult.error?.message)
+    return 0
+  }
+
+  for (const lead of hotLeadsResult.data || []) {
+    const alreadySent = await alreadySentToday('crm_hot_lead', lead.id, today)
+    if (alreadySent) continue
+
+    const sent = await safeSendAndLog({
+      alertType: 'crm_hot_lead',
+      referenceId: lead.id,
+      referenceDate: today,
+      messageText: buildCrmHotLeadMessage({
+        parentName: lead.parent_name,
+        studentName: lead.student_name,
+        program: lead.program_interest || 'cours Cambridge Campus',
+      }),
+    })
+
+    if (sent) alertsSent += 1
+  }
+
+  for (const lead of trialResult.data || []) {
+    const alreadySent = await alreadySentToday('crm_trial_tomorrow', lead.id, today)
+    if (alreadySent) continue
+
+    const sent = await safeSendAndLog({
+      alertType: 'crm_trial_tomorrow',
+      referenceId: lead.id,
+      referenceDate: today,
+      messageText: buildCrmTrialTomorrowMessage({
+        parentName: lead.parent_name,
+        studentName: lead.student_name,
+        trialDate: extractTime(lead.trial_date) || tomorrowKey,
+      }),
+    })
+
+    if (sent) alertsSent += 1
+  }
+
+  for (const followup of paymentResult.data || []) {
+    const student = Array.isArray(followup.student) ? followup.student[0] : followup.student
+    const lead = Array.isArray(followup.lead) ? followup.lead[0] : followup.lead
+    const alreadySent = await alreadySentToday('crm_payment_overdue', followup.id, today)
+    if (alreadySent || !student?.full_name) continue
+
+    const sent = await safeSendAndLog({
+      alertType: 'crm_payment_overdue',
+      referenceId: followup.id,
+      referenceDate: today,
+      messageText: buildCrmPaymentOverdueMessage({
+        parentName: lead?.parent_name || student.parent_name || 'Parent non renseigné',
+        studentName: student.full_name,
+        dueDate: student.payment_due_date || today,
+      }),
+    })
+
+    if (sent) alertsSent += 1
   }
 
   return alertsSent

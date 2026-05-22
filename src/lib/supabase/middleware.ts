@@ -34,7 +34,7 @@ export async function updateSession(request: NextRequest) {
   const demoRole = request.cookies.get('demo-role')?.value || 'admin'
   const { pathname } = request.nextUrl
 
-  if (pathname.startsWith('/api/alerts/')) {
+  if (pathname.startsWith('/api/alerts/') || pathname.startsWith('/api/placement/')) {
     return supabaseResponse
   }
 
@@ -79,7 +79,7 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   // Public routes
-  const publicPaths = ['/login', '/forgot-password', '/reset-password', '/auth/callback']
+  const publicPaths = ['/login', '/forgot-password', '/reset-password', '/auth/callback', '/test']
   if (publicPaths.some((p) => pathname.startsWith(p))) {
     // If user is already logged in and visiting login, redirect to dashboard
     if (user && (pathname === '/login' || pathname === '/forgot-password')) {

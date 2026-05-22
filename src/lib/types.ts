@@ -128,6 +128,203 @@ export interface StudentPaymentRecord {
   created_at: string
 }
 
+export type CrmLeadStatus =
+  | 'new'
+  | 'contacted'
+  | 'interested'
+  | 'trial_scheduled'
+  | 'test_completed'
+  | 'enrolled'
+  | 'lost'
+  | 'no_response'
+
+export type CrmTaskType = 'follow_up' | 'call' | 'trial' | 'meeting' | 'other'
+export type CrmTaskStatus = 'pending' | 'completed' | 'cancelled'
+export type CrmLeadTemperature = 'hot' | 'warm' | 'cold'
+
+export interface CrmLead {
+  id: string
+  center_id: string | null
+  created_by: string | null
+  assigned_to: string | null
+  converted_student_id: string | null
+  parent_name: string
+  parent_phone: string | null
+  parent_whatsapp: string | null
+  parent_email: string | null
+  audience: 'junior' | 'adult' | null
+  student_name: string
+  student_age: number | null
+  student_level: string | null
+  program_interest: string | null
+  availability: string | null
+  goal: string | null
+  source: string | null
+  status: CrmLeadStatus
+  trial_date: string | null
+  next_follow_up_at: string | null
+  last_contact_at: string | null
+  placement_test_completed_at: string | null
+  placement_test_score: number | null
+  placement_test_total_questions: number | null
+  placement_test_xp: number | null
+  placement_test_badge: string | null
+  placement_test_level: string | null
+  placement_test_recommended_class: string | null
+  lost_reason: string | null
+  created_at: string
+  updated_at: string
+  center?: Center | null
+  assignee?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
+  student?: Student | null
+}
+
+export interface CrmNote {
+  id: string
+  lead_id: string
+  author_id: string | null
+  note: string
+  created_at: string
+  author?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
+}
+
+export interface CrmTask {
+  id: string
+  lead_id: string
+  assigned_to: string | null
+  created_by: string | null
+  task_type: CrmTaskType
+  title: string
+  due_at: string
+  status: CrmTaskStatus
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+  assignee?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
+}
+
+export type CrmMessageTemplateType = 'first_contact' | 'follow_up' | 'trial_invite' | 'trial_reminder'
+
+export interface CrmMessageTemplate {
+  id: string
+  name: string
+  message_type: CrmMessageTemplateType
+  message_body: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CrmDashboardStats {
+  newThisWeek: number
+  followUpsToday: number
+  overdueFollowUps: number
+  trialsScheduled: number
+  enrolledThisMonth: number
+  lostThisMonth: number
+}
+
+export interface CrmSourceStat {
+  source: string
+  total: number
+  enrolled: number
+  lost: number
+}
+
+export interface CrmLeadScore {
+  lead_id: string
+  score: number
+  temperature: CrmLeadTemperature
+  score_factors: Array<{ label: string; score: number }>
+  scored_at: string
+  updated_at: string
+}
+
+export interface CrmScoredLead extends CrmLeadScore {
+  lead: CrmLead
+}
+
+export type CrmPaymentFollowupStatus = 'overdue' | 'promised' | 'resolved' | 'blocked'
+
+export interface CrmPaymentFollowup {
+  id: string
+  student_id: string
+  lead_id: string | null
+  status: CrmPaymentFollowupStatus
+  amount_due: number | null
+  promised_payment_date: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+  student?: Student | null
+  lead?: CrmLead | null
+}
+
+export interface CrmAnalyticsSummary {
+  totalLeads: number
+  hotLeads: number
+  warmLeads: number
+  coldLeads: number
+  conversionRate: number
+  overduePaymentCases: number
+  promisedPaymentCases: number
+}
+
+export interface PlacementQuestion {
+  id: string
+  language_code: 'english'
+  mission_order: number
+  question_order: number
+  mission_title: string
+  mission_icon: string
+  prompt: string
+  context_text: string | null
+  option_a: string
+  option_b: string
+  option_c: string
+  option_d: string
+  correct_option: 'A' | 'B' | 'C' | 'D'
+  cefr_level: string
+  xp_points: number
+  is_active: boolean
+  created_at: string
+}
+
+export type PlacementQuestionPublic = Omit<PlacementQuestion, 'correct_option' | 'created_at'>
+
+export interface PlacementAttempt {
+  id: string
+  lead_id: string | null
+  full_name: string
+  contact_phone: string
+  age: number | null
+  audience: 'junior' | 'adult'
+  language_code: 'english'
+  status: 'started' | 'completed' | 'abandoned'
+  total_questions: number
+  answered_questions: number
+  correct_answers: number
+  raw_score: number
+  xp_score: number
+  current_streak: number
+  best_streak: number
+  badge: string | null
+  estimated_level: string | null
+  recommended_class: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PlacementAnswer {
+  id: string
+  attempt_id: string
+  question_id: string
+  selected_option: 'A' | 'B' | 'C' | 'D'
+  is_correct: boolean
+  answered_at: string
+}
+
 export interface Room {
   id: string
   center_id: string

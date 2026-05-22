@@ -13,6 +13,21 @@ import type {
   TeacherReport,
   AttendanceSession,
   AttendanceCorrectionRequest,
+  CrmDashboardStats,
+  CrmLead,
+  CrmLeadStatus,
+  CrmLeadTemperature,
+  CrmMessageTemplate,
+  CrmNote,
+  CrmPaymentFollowup,
+  CrmPaymentFollowupStatus,
+  CrmScoredLead,
+  CrmSourceStat,
+  CrmTask,
+  CrmTaskStatus,
+  CrmTaskType,
+  CrmAnalyticsSummary,
+  Profile,
   ReceptionUser,
   Student,
   StudentAttendance,
@@ -1897,7 +1912,753 @@ export async function recordStudentPayment(payload: {
     .eq('id', payload.student_id)
 
   if (studentError) return { error: studentError.message }
+
+  await admin
+    .from('crm_payment_followups')
+    .update({
+      status: 'resolved',
+      promised_payment_date: null,
+    })
+    .eq('student_id', payload.student_id)
+    .neq('status', 'resolved')
+
   return { success: true, next_due_date: nextDueDate }
+}
+
+type CrmLeadPayload = {
+  center_id?: string | null
+  assigned_to?: string | null
+  parent_name: string
+  parent_phone?: string | null
+  parent_whatsapp?: string | null
+  parent_email?: string | null
+  audience?: 'junior' | 'adult' | null
+  student_name: string
+  student_age?: number | null
+  student_level?: string | null
+  program_interest?: string | null
+  availability?: string | null
+  goal?: string | null
+  source?: string | null
+  status?: CrmLeadStatus
+  trial_date?: string | null
+  next_follow_up_at?: string | null
+  last_contact_at?: string | null
+  lost_reason?: string | null
+}
+
+type CrmTaskPayload = {
+  lead_id: string
+  assigned_to?: string | null
+  task_type?: CrmTaskType
+  title: string
+  due_at: string
+  status?: CrmTaskStatus
+}
+
+type ScoreFactor = { label: string; score: number }
+
+function normalizeEmail(value?: string | null) {
+  const normalized = normalizeString(value)
+  return normalized ? normalized.toLowerCase() : null
+}
+
+function normalizeCrmLeadPayload(payload: Partial<CrmLeadPayload>) {
+  return {
+    center_id: payload.center_id || null,
+    assigned_to: payload.assigned_to || null,
+    parent_name: payload.parent_name?.trim(),
+    parent_phone: payload.parent_phone !== undefined ? normalizeString(payload.parent_phone) : undefined,
+    parent_whatsapp: payload.parent_whatsapp !== undefined ? normalizeString(payload.parent_whatsapp) : undefined,
+    parent_email: payload.parent_email !== undefined ? normalizeEmail(payload.parent_email) : undefined,
+    audience: payload.audience !== undefined ? payload.audience || null : undefined,
+    student_name: payload.student_name?.trim(),
+    student_age: payload.student_age ?? undefined,
+    student_level: payload.student_level !== undefined ? normalizeString(payload.student_level) : undefined,
+    program_interest: payload.program_interest !== undefined ? normalizeString(payload.program_interest) : undefined,
+    availability: payload.availability !== undefined ? normalizeString(payload.availability) : undefined,
+    goal: payload.goal !== undefined ? normalizeString(payload.goal) : undefined,
+    source: payload.source !== undefined ? normalizeString(payload.source) : undefined,
+    status: payload.status,
+    trial_date: payload.trial_date !== undefined ? payload.trial_date || null : undefined,
+    next_follow_up_at: payload.next_follow_up_at !== undefined ? payload.next_follow_up_at || null : undefined,
+    last_contact_at: payload.last_contact_at !== undefined ? payload.last_contact_at || null : undefined,
+    lost_reason: payload.lost_reason !== undefined ? normalizeString(payload.lost_reason) : undefined,
+  }
+}
+
+function getLeadTemperature(score: number): CrmLeadTemperature {
+  if (score >= 70) return 'hot'
+  if (score >= 40) return 'warm'
+  return 'cold'
+}
+
+function buildLeadScoreFactors(params: {
+  lead: Pick<CrmLead, 'status' | 'trial_date' | 'next_follow_up_at' | 'last_contact_at' | 'source' | 'program_interest'>
+  pendingTasks: number
+}) {
+  const factors: ScoreFactor[] = []
+  const now = new Date()
+
+  if (params.lead.status === 'interested') factors.push({ label: 'Prospect intéressé', score: 20 })
+  if (params.lead.status === 'trial_scheduled') factors.push({ label: 'Test planifié', score: 30 })
+  if (params.lead.status === 'test_completed') factors.push({ label: 'Test de niveau terminé', score: 25 })
+  if (params.lead.program_interest) factors.push({ label: 'Programme demandé précisé', score: 10 })
+  if (params.lead.source && ['facebook', 'instagram', 'whatsapp', 'referral'].includes(params.lead.source.toLowerCase())) {
+    factors.push({ label: 'Source marketing qualifiée', score: 10 })
+  }
+  if (params.pendingTasks > 0) factors.push({ label: 'Relance planifiée', score: 10 })
+
+  if (params.lead.trial_date) {
+    const diffMs = new Date(params.lead.trial_date).getTime() - now.getTime()
+    if (diffMs > 0 && diffMs <= 3 * 24 * 60 * 60 * 1000) {
+      factors.push({ label: 'Test imminent', score: 20 })
+    }
+  }
+
+  if (params.lead.last_contact_at) {
+    const daysSinceContact = Math.floor((now.getTime() - new Date(params.lead.last_contact_at).getTime()) / (24 * 60 * 60 * 1000))
+    if (daysSinceContact >= 7) factors.push({ label: 'Aucune réponse depuis 7 jours', score: -20 })
+    else if (daysSinceContact <= 2) factors.push({ label: 'Contact récent', score: 10 })
+  }
+
+  if (params.lead.next_follow_up_at) {
+    const followUp = new Date(params.lead.next_follow_up_at)
+    if (followUp.getTime() < now.getTime()) factors.push({ label: 'Relance en retard', score: -15 })
+  }
+
+  if (params.lead.status === 'lost' || params.lead.status === 'no_response') {
+    factors.push({ label: 'Prospect froid ou perdu', score: -30 })
+  }
+
+  const score = Math.max(0, factors.reduce((sum, factor) => sum + factor.score, 0))
+  return {
+    score,
+    temperature: getLeadTemperature(score),
+    factors,
+  }
+}
+
+export async function getCrmAssignableUsers(): Promise<Profile[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('profiles')
+    .select('id, full_name, email, role, phone, status, created_at')
+    .in('role', ['admin', 'reception'])
+    .eq('status', 'active')
+    .order('full_name')
+
+  return (data || []) as Profile[]
+}
+
+export async function getCrmDashboardStats(): Promise<CrmDashboardStats> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') {
+    return {
+      newThisWeek: 0,
+      followUpsToday: 0,
+      overdueFollowUps: 0,
+      trialsScheduled: 0,
+      enrolledThisMonth: 0,
+      lostThisMonth: 0,
+    }
+  }
+
+  const admin = createAdminClient()
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
+  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString()
+  const startOfWeek = getLocalWeekStart(now).toISOString()
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+
+  const [
+    newThisWeekRes,
+    followUpsTodayRes,
+    overdueFollowUpsRes,
+    trialsScheduledRes,
+    enrolledThisMonthRes,
+    lostThisMonthRes,
+  ] = await Promise.all([
+    admin.from('crm_leads').select('id', { count: 'exact', head: true }).gte('created_at', startOfWeek),
+    admin
+      .from('crm_leads')
+      .select('id', { count: 'exact', head: true })
+      .gte('next_follow_up_at', startOfToday)
+      .lt('next_follow_up_at', endOfToday)
+      .not('status', 'in', '(enrolled,lost)'),
+    admin
+      .from('crm_leads')
+      .select('id', { count: 'exact', head: true })
+      .lt('next_follow_up_at', startOfToday)
+      .not('status', 'in', '(enrolled,lost)'),
+    admin
+      .from('crm_leads')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'trial_scheduled'),
+    admin
+      .from('crm_leads')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'enrolled')
+      .gte('updated_at', startOfMonth),
+    admin
+      .from('crm_leads')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'lost')
+      .gte('updated_at', startOfMonth),
+  ])
+
+  return {
+    newThisWeek: newThisWeekRes.count || 0,
+    followUpsToday: followUpsTodayRes.count || 0,
+    overdueFollowUps: overdueFollowUpsRes.count || 0,
+    trialsScheduled: trialsScheduledRes.count || 0,
+    enrolledThisMonth: enrolledThisMonthRes.count || 0,
+    lostThisMonth: lostThisMonthRes.count || 0,
+  }
+}
+
+export async function getCrmSourceStats(): Promise<CrmSourceStat[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('crm_leads')
+    .select('source, status')
+
+  if (error || !data) return []
+
+  const sourceMap = new Map<string, CrmSourceStat>()
+
+  data.forEach((lead) => {
+    const source = (lead.source || 'Source inconnue').trim()
+    const current = sourceMap.get(source) || {
+      source,
+      total: 0,
+      enrolled: 0,
+      lost: 0,
+    }
+
+    current.total += 1
+    if (lead.status === 'enrolled') current.enrolled += 1
+    if (lead.status === 'lost') current.lost += 1
+    sourceMap.set(source, current)
+  })
+
+  return Array.from(sourceMap.values()).sort((a, b) => b.total - a.total)
+}
+
+export async function getCrmMessageTemplates(): Promise<CrmMessageTemplate[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('crm_message_templates')
+    .select('*')
+    .eq('is_active', true)
+    .order('message_type')
+    .order('name')
+
+  return (data || []) as CrmMessageTemplate[]
+}
+
+export async function updateCrmMessageTemplate(
+  templateId: string,
+  payload: Partial<{
+    name: string
+    message_type: CrmMessageTemplate['message_type']
+    message_body: string
+    is_active: boolean
+  }>,
+) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('crm_message_templates')
+    .update({
+      name: payload.name?.trim(),
+      message_type: payload.message_type,
+      message_body: payload.message_body?.trim(),
+      is_active: payload.is_active,
+    })
+    .eq('id', templateId)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function refreshCrmLeadScores(): Promise<{ success: true; updated: number } | { error: string }> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const [leadResult, taskResult] = await Promise.all([
+    admin
+      .from('crm_leads')
+      .select('id, status, trial_date, next_follow_up_at, last_contact_at, source, program_interest'),
+    admin
+      .from('crm_tasks')
+      .select('lead_id, status')
+      .eq('status', 'pending'),
+  ])
+
+  if (leadResult.error || taskResult.error) {
+    return { error: leadResult.error?.message || taskResult.error?.message || 'Impossible de calculer les scores CRM.' }
+  }
+
+  const pendingTaskCount = new Map<string, number>()
+  ;(taskResult.data || []).forEach((task) => {
+    pendingTaskCount.set(task.lead_id, (pendingTaskCount.get(task.lead_id) || 0) + 1)
+  })
+
+  const payload = (leadResult.data || []).map((lead) => {
+    const scoreData = buildLeadScoreFactors({
+      lead: lead as Pick<CrmLead, 'status' | 'trial_date' | 'next_follow_up_at' | 'last_contact_at' | 'source' | 'program_interest'>,
+      pendingTasks: pendingTaskCount.get(lead.id) || 0,
+    })
+
+    return {
+      lead_id: lead.id,
+      score: scoreData.score,
+      temperature: scoreData.temperature,
+      score_factors: scoreData.factors,
+      scored_at: new Date().toISOString(),
+    }
+  })
+
+  if (payload.length === 0) return { success: true, updated: 0 }
+
+  const { error } = await admin
+    .from('crm_lead_scores')
+    .upsert(payload, { onConflict: 'lead_id' })
+
+  if (error) return { error: error.message }
+  return { success: true, updated: payload.length }
+}
+
+export async function getHotCrmLeads(): Promise<CrmScoredLead[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const refreshed = await refreshCrmLeadScores()
+  if ('error' in refreshed) return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('crm_lead_scores')
+    .select('lead_id, score, temperature, score_factors, scored_at, updated_at, lead:crm_leads(*, center:centers(*), assignee:profiles!crm_leads_assigned_to_fkey(id, full_name, role), student:students(*))')
+    .eq('temperature', 'hot')
+    .order('score', { ascending: false })
+
+  return ((data || []) as unknown as CrmScoredLead[]).filter((entry) => Boolean(entry.lead))
+}
+
+export async function syncCrmPaymentFollowups(): Promise<{ success: true; updated: number } | { error: string }> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const today = formatDateKey(new Date())
+  const [studentsResult, leadsResult] = await Promise.all([
+    admin
+      .from('students')
+      .select('id, full_name, payment_due_date, access_status')
+      .not('payment_due_date', 'is', null),
+    admin
+      .from('crm_leads')
+      .select('id, converted_student_id')
+      .not('converted_student_id', 'is', null),
+  ])
+
+  if (studentsResult.error || leadsResult.error) {
+    return { error: studentsResult.error?.message || leadsResult.error?.message || 'Impossible de synchroniser les impayés CRM.' }
+  }
+
+  const leadByStudentId = new Map<string, string>()
+  ;(leadsResult.data || []).forEach((lead) => {
+    if (lead.converted_student_id) leadByStudentId.set(lead.converted_student_id, lead.id)
+  })
+
+  const allStudents = studentsResult.data || []
+  const overdueStudents = allStudents.filter((student) => {
+    if (!student.payment_due_date) return false
+    return student.payment_due_date < today
+  })
+  const overdueStudentIds = new Set(overdueStudents.map((student) => student.id))
+
+  const { data: existingFollowups } = await admin
+    .from('crm_payment_followups')
+    .select('id, student_id, status')
+
+  for (const followup of existingFollowups || []) {
+    if (!overdueStudentIds.has(followup.student_id) && followup.status !== 'resolved') {
+      await admin
+        .from('crm_payment_followups')
+        .update({ status: 'resolved' })
+        .eq('id', followup.id)
+    }
+  }
+
+  let updated = 0
+  for (const student of overdueStudents) {
+    const followupPayload = {
+      student_id: student.id,
+      lead_id: leadByStudentId.get(student.id) || null,
+      status: student.access_status === 'blocked' ? 'blocked' : 'overdue',
+      amount_due: null,
+    }
+
+    const existing = (existingFollowups || []).find((followup) => followup.student_id === student.id && followup.status !== 'resolved')
+    if (existing) {
+      const { error } = await admin
+        .from('crm_payment_followups')
+        .update({
+          lead_id: followupPayload.lead_id,
+          status: followupPayload.status,
+          amount_due: followupPayload.amount_due,
+        })
+        .eq('id', existing.id)
+
+      if (!error) updated += 1
+    } else {
+      const { error } = await admin
+        .from('crm_payment_followups')
+        .insert(followupPayload)
+
+      if (!error) updated += 1
+    }
+  }
+
+  return { success: true, updated }
+}
+
+export async function getCrmPaymentFollowups(): Promise<CrmPaymentFollowup[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const synced = await syncCrmPaymentFollowups()
+  if ('error' in synced) return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('crm_payment_followups')
+    .select('*, student:students(*), lead:crm_leads(*, center:centers(*), assignee:profiles!crm_leads_assigned_to_fkey(id, full_name, role), student:students(*))')
+    .order('updated_at', { ascending: false })
+
+  return (data || []) as CrmPaymentFollowup[]
+}
+
+export async function updateCrmPaymentFollowup(
+  followupId: string,
+  payload: {
+    status?: CrmPaymentFollowupStatus
+    promised_payment_date?: string | null
+    notes?: string | null
+  },
+) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('crm_payment_followups')
+    .update({
+      status: payload.status,
+      promised_payment_date: payload.promised_payment_date !== undefined ? payload.promised_payment_date || null : undefined,
+      notes: payload.notes !== undefined ? normalizeString(payload.notes) : undefined,
+    })
+    .eq('id', followupId)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function getCrmAnalyticsSummary(): Promise<CrmAnalyticsSummary> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') {
+    return {
+      totalLeads: 0,
+      hotLeads: 0,
+      warmLeads: 0,
+      coldLeads: 0,
+      conversionRate: 0,
+      overduePaymentCases: 0,
+      promisedPaymentCases: 0,
+    }
+  }
+
+  await refreshCrmLeadScores()
+  await syncCrmPaymentFollowups()
+
+  const admin = createAdminClient()
+  const [leadCountRes, scoreRes, enrolledRes, paymentRes] = await Promise.all([
+    admin.from('crm_leads').select('id', { count: 'exact', head: true }),
+    admin.from('crm_lead_scores').select('temperature'),
+    admin.from('crm_leads').select('id', { count: 'exact', head: true }).eq('status', 'enrolled'),
+    admin.from('crm_payment_followups').select('status'),
+  ])
+
+  const totalLeads = leadCountRes.count || 0
+  const scoreRows = scoreRes.data || []
+  const paymentRows = paymentRes.data || []
+
+  return {
+    totalLeads,
+    hotLeads: scoreRows.filter((row) => row.temperature === 'hot').length,
+    warmLeads: scoreRows.filter((row) => row.temperature === 'warm').length,
+    coldLeads: scoreRows.filter((row) => row.temperature === 'cold').length,
+    conversionRate: totalLeads ? Math.round(((enrolledRes.count || 0) / totalLeads) * 100) : 0,
+    overduePaymentCases: paymentRows.filter((row) => row.status === 'overdue' || row.status === 'blocked').length,
+    promisedPaymentCases: paymentRows.filter((row) => row.status === 'promised').length,
+  }
+}
+
+export async function getCrmLeadById(leadId: string): Promise<CrmLead | null> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return null
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('crm_leads')
+    .select('*, center:centers(*), assignee:profiles!crm_leads_assigned_to_fkey(id, full_name, role), student:students(*)')
+    .eq('id', leadId)
+    .maybeSingle()
+
+  return (data as CrmLead | null) || null
+}
+
+export async function getCrmNotes(leadId: string): Promise<CrmNote[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('crm_notes')
+    .select('*, author:profiles(id, full_name, role)')
+    .eq('lead_id', leadId)
+    .order('created_at', { ascending: false })
+
+  return (data || []) as CrmNote[]
+}
+
+export async function getCrmTasks(leadId: string): Promise<CrmTask[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('crm_tasks')
+    .select('*, assignee:profiles!crm_tasks_assigned_to_fkey(id, full_name, role)')
+    .eq('lead_id', leadId)
+    .order('due_at')
+
+  return (data || []) as CrmTask[]
+}
+
+export async function createCrmLead(payload: CrmLeadPayload) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+  if (!payload.parent_name.trim() || !payload.student_name.trim()) {
+    return { error: 'Le parent et l’étudiant sont obligatoires.' }
+  }
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('crm_leads')
+    .insert({
+      ...normalizeCrmLeadPayload(payload),
+      created_by: user.id,
+      status: payload.status || 'new',
+    })
+    .select('id')
+    .single()
+
+  if (error || !data) return { error: error?.message || 'Impossible de créer le prospect.' }
+  return { success: true, leadId: data.id }
+}
+
+export async function updateCrmLead(leadId: string, payload: Partial<CrmLeadPayload>) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const normalized = normalizeCrmLeadPayload(payload)
+  const { error } = await admin
+    .from('crm_leads')
+    .update(normalized)
+    .eq('id', leadId)
+
+  if (error) return { error: error.message }
+  return { success: true, studentId: student.id }
+}
+
+export async function addCrmLeadNote(leadId: string, note: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const content = note.trim()
+  if (!content) return { error: 'La note est vide.' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('crm_notes')
+    .insert({
+      lead_id: leadId,
+      author_id: user.id,
+      note: content,
+    })
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function deleteCrmLead(leadId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('crm_leads')
+    .delete()
+    .eq('id', leadId)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function updateCrmLeadStatus(leadId: string, status: CrmLeadStatus) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const payload: {
+    status: CrmLeadStatus
+    last_contact_at: string
+    trial_date?: string | null
+  } = {
+    status,
+    last_contact_at: new Date().toISOString(),
+  }
+
+  if (status !== 'trial_scheduled') {
+    payload.trial_date = null
+  }
+
+  const { error } = await admin
+    .from('crm_leads')
+    .update(payload)
+    .eq('id', leadId)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function createCrmTask(payload: CrmTaskPayload) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const title = payload.title.trim()
+  if (!title || !payload.due_at) return { error: 'Titre et échéance obligatoires.' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('crm_tasks')
+    .insert({
+      lead_id: payload.lead_id,
+      assigned_to: payload.assigned_to || null,
+      created_by: user.id,
+      task_type: payload.task_type || 'follow_up',
+      title,
+      due_at: payload.due_at,
+      status: payload.status || 'pending',
+    })
+
+  if (error) return { error: error.message }
+
+  await admin
+    .from('crm_leads')
+    .update({
+      next_follow_up_at: payload.due_at,
+    })
+    .eq('id', payload.lead_id)
+
+  return { success: true }
+}
+
+export async function updateCrmTaskStatus(taskId: string, status: CrmTaskStatus) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('crm_tasks')
+    .update({
+      status,
+      completed_at: status === 'completed' ? new Date().toISOString() : null,
+    })
+    .eq('id', taskId)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function convertCrmLeadToStudent(leadId: string) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const admin = createAdminClient()
+  const { data: lead, error: leadError } = await admin
+    .from('crm_leads')
+    .select('*')
+    .eq('id', leadId)
+    .single()
+
+  if (leadError || !lead) return { error: 'Prospect introuvable.' }
+  if (lead.converted_student_id) return { success: true, studentId: lead.converted_student_id }
+
+  const { data: student, error: studentError } = await admin
+    .from('students')
+    .insert({
+      center_id: lead.center_id,
+      full_name: lead.student_name,
+      parent_name: lead.parent_name,
+      parent_phone: lead.parent_phone,
+      phone: lead.parent_whatsapp || lead.parent_phone,
+      email: lead.parent_email,
+      status: 'active',
+      access_status: 'allowed',
+    })
+    .select('id')
+    .single()
+
+  if (studentError || !student) return { error: studentError?.message || 'Impossible de créer l’étudiant.' }
+
+  const { error: updateLeadError } = await admin
+    .from('crm_leads')
+    .update({
+      converted_student_id: student.id,
+      status: 'enrolled',
+      last_contact_at: new Date().toISOString(),
+    })
+    .eq('id', leadId)
+
+  if (updateLeadError) return { error: updateLeadError.message }
+
+  await admin
+    .from('crm_notes')
+    .insert({
+      lead_id: leadId,
+      author_id: user.id,
+      note: `Prospect converti en étudiant (${student.id}).`,
+    })
+
+  return { success: true, studentId: student.id }
 }
 
 export async function markStudentPresentForToday(payload: {

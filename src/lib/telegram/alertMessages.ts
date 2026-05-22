@@ -176,3 +176,78 @@ export function buildDailySummaryMessage(params: {
     dashboardLink('/dashboard', 'Voir le dashboard'),
   ].join('\n')
 }
+
+export function buildCrmHotLeadMessage(params: {
+  parentName: string
+  studentName: string
+  program: string
+}): string {
+  return [
+    '🔥 <b>Prospect chaud sans suivi</b>',
+    '',
+    `👤 Parent : <b>${params.parentName}</b>`,
+    `🎓 Élève : ${params.studentName}`,
+    `📚 Programme : ${params.program}`,
+    '',
+    '⚠️ Prospect prioritaire à rappeler rapidement.',
+    '',
+    dashboardLink('/admin/crm/hot-leads', 'Voir les prospects chauds'),
+  ].join('\n')
+}
+
+export function buildCrmTrialTomorrowMessage(params: {
+  parentName: string
+  studentName: string
+  trialDate: string
+}): string {
+  return [
+    '🗓️ <b>Test prévu demain</b>',
+    '',
+    `👤 Parent : <b>${params.parentName}</b>`,
+    `🎓 Élève : ${params.studentName}`,
+    `🕐 ${params.trialDate}`,
+    '',
+    dashboardLink('/admin/crm/follow-ups', 'Voir les relances CRM'),
+  ].join('\n')
+}
+
+export function buildCrmPaymentOverdueMessage(params: {
+  parentName: string
+  studentName: string
+  dueDate: string
+}): string {
+  return [
+    '💳 <b>Paiement en retard</b>',
+    '',
+    `👤 Parent : <b>${params.parentName}</b>`,
+    `🎓 Élève : ${params.studentName}`,
+    `📅 Échéance dépassée : ${params.dueDate}`,
+    '',
+    dashboardLink('/admin/crm/payment-followups', 'Voir le recouvrement CRM'),
+  ].join('\n')
+}
+
+export function buildPlacementTestCompletedMessage(params: {
+  fullName: string
+  phone: string
+  audience: 'junior' | 'adult'
+  score: number
+  xp: number
+  badge: string
+  level: string
+  recommendedClass: string
+}): string {
+  return [
+    '🎯 <b>English Quest terminé</b>',
+    '',
+    `👤 <b>${params.fullName}</b>`,
+    `📱 ${params.phone}`,
+    `🧭 Parcours : ${params.audience === 'junior' ? 'Junior' : 'Adult'}`,
+    `🏅 Badge : <b>${params.badge}</b>`,
+    `📈 Niveau estimé : ${params.level}`,
+    `⭐ Score : ${params.score}% · ${params.xp} XP`,
+    `📚 Groupe conseillé : ${params.recommendedClass}`,
+    '',
+    dashboardLink('/admin/crm', 'Ouvrir le CRM'),
+  ].join('\n')
+}

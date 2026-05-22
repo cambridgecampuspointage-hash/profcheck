@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import {
   autoCloseForgottenAttendanceSessions,
+  checkCrmAlerts,
   checkOutOfPlanningAlerts,
   checkStaffAlerts,
   checkTeacherAlerts,
@@ -39,21 +40,23 @@ export async function GET(request: Request) {
     const supabase = getAlertsSupabaseClient()
     const { today, nowTime } = getMoroccoNow()
 
-    const [teacherAlerts, outOfPlanningAlerts, staffAlerts, autoClosedSessions] = await Promise.all([
+    const [teacherAlerts, outOfPlanningAlerts, staffAlerts, crmAlerts, autoClosedSessions] = await Promise.all([
       checkTeacherAlerts(supabase, today, nowTime),
       checkOutOfPlanningAlerts(supabase, today),
       checkStaffAlerts(supabase, today, nowTime),
+      checkCrmAlerts(supabase, today),
       autoCloseForgottenAttendanceSessions(supabase),
     ])
 
     return NextResponse.json({
       ok: true,
       checked_at: new Date().toISOString(),
-      alerts_sent: teacherAlerts + outOfPlanningAlerts + staffAlerts,
+      alerts_sent: teacherAlerts + outOfPlanningAlerts + staffAlerts + crmAlerts,
       details: {
         teacher_alerts: teacherAlerts,
         out_of_planning: outOfPlanningAlerts,
         staff_alerts: staffAlerts,
+        crm_alerts: crmAlerts,
         auto_closed_sessions: autoClosedSessions,
       },
     })
