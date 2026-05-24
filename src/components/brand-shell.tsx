@@ -20,12 +20,14 @@ export function BrandShell({
   sectionLabel,
   notificationCount = 0,
   notificationHref,
+  floatingAssistant,
 }: {
   children: React.ReactNode
   navItems: BrandNavItem[]
   sectionLabel: string
   notificationCount?: number
   notificationHref?: string
+  floatingAssistant?: React.ReactNode
 }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -166,6 +168,8 @@ export function BrandShell({
 
         <main className="brand-content">{children}</main>
       </div>
+
+      {floatingAssistant}
     </div>
   )
 }

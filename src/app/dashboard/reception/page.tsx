@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { AiSummaryCard } from '@/components/ai/AiSummaryCard'
 import { DayAttendanceCard } from './components/DayAttendanceCard'
 import { MonthSummaryTable } from './components/MonthSummaryTable'
 import { WorkScheduleForm } from './components/WorkScheduleForm'
@@ -331,6 +332,13 @@ export default function ReceptionAdminDashboardPage() {
   return (
     <div style={pageStyle}>
       <div style={containerStyle}>
+        <AiSummaryCard
+          title="Briefing IA réception"
+          subtitle="Briefing rapide sur les priorités du jour, les retards RH et les relances à faire."
+          endpoint="/api/ai/reception-briefing"
+          tone="#0f766e"
+        />
+
         <div>
           <Link href="/dashboard" style={backLinkStyle}>
             ← Retour à l’accueil admin

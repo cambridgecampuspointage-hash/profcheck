@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { AiSummaryCard } from '@/components/ai/AiSummaryCard'
 
 type AlertHistoryEntry = {
   id: string
@@ -245,6 +246,13 @@ export default function TelegramSettingsPage() {
   return (
     <div style={{ minHeight: '100vh', background: '#FAF8F3', padding: '2rem clamp(1rem, 2vw, 2rem)' }}>
       <div style={{ maxWidth: 1180, margin: '0 auto', display: 'grid', gap: '1.2rem' }}>
+        <AiSummaryCard
+          title="Résumé IA des alertes"
+          subtitle="Vue rapide sur les envois Telegram récents, les erreurs et les signaux à surveiller."
+          endpoint="/api/ai/alerts-summary"
+          tone="#b45309"
+        />
+
         <header style={cardStyle}>
           <h1 style={{ margin: 0, color: '#1B2D5B', fontSize: '1.9rem', fontWeight: 800 }}>
             Notifications Telegram

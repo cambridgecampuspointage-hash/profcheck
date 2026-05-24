@@ -171,12 +171,14 @@ export interface CrmLead {
   placement_test_badge: string | null
   placement_test_level: string | null
   placement_test_recommended_class: string | null
+  recommended_class_id: string | null
   lost_reason: string | null
   created_at: string
   updated_at: string
   center?: Center | null
   assignee?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
   student?: Student | null
+  recommended_class?: StudentClass | null
 }
 
 export interface CrmNote {
@@ -268,6 +270,61 @@ export interface CrmAnalyticsSummary {
   conversionRate: number
   overduePaymentCases: number
   promisedPaymentCases: number
+}
+
+export type CrmActivityType =
+  | 'call'
+  | 'whatsapp'
+  | 'note'
+  | 'test_completed'
+  | 'trial_scheduled'
+  | 'payment_followup'
+  | 'status_change'
+  | 'enrollment'
+  | 'telegram_alert'
+  | 'follow_up_reminder'
+  | 'class_recommendation'
+
+export interface CrmActivity {
+  id: string
+  lead_id: string | null
+  student_id: string | null
+  actor_id: string | null
+  activity_type: CrmActivityType
+  title: string
+  detail: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+  actor?: Pick<Profile, 'id' | 'full_name' | 'role'> | null
+  student?: Student | null
+}
+
+export type CrmSmartFollowupKind =
+  | 'test_completed_no_call'
+  | 'hot_lead_not_contacted'
+  | 'promised_payment_missing'
+  | 'trial_tomorrow'
+  | 'student_absent_twice'
+
+export interface CrmSmartFollowup {
+  id: string
+  kind: CrmSmartFollowupKind
+  severity: 'high' | 'medium'
+  title: string
+  detail: string
+  lead_id: string | null
+  student_id: string | null
+  due_at?: string | null
+}
+
+export interface CrmRecommendedClassMatch {
+  class_id: string
+  class_name: string
+  level: string | null
+  audience: string | null
+  next_session_at: string | null
+  score: number
+  rationale: string[]
 }
 
 export interface PlacementQuestion {

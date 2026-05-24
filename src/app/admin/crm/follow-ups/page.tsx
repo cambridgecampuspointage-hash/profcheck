@@ -3,8 +3,8 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { getCrmMessageTemplates, getCrmSourceStats } from '@/lib/actions'
-import type { CrmLead, CrmMessageTemplate } from '@/lib/types'
+import { getCrmMessageTemplates, getCrmSmartFollowups, getCrmSourceStats } from '@/lib/actions'
+import type { CrmLead, CrmMessageTemplate, CrmSmartFollowup } from '@/lib/types'
 import { CrmQuickActions } from '../components/CrmQuickActions'
 import { CRM_STATUS_OPTIONS, CRM_STATUS_STYLES, formatDateTime } from '../components/crm-config'
 
@@ -15,6 +15,7 @@ export default function CrmFollowUpsPage() {
   const [loading, setLoading] = useState(true)
   const [leads, setLeads] = useState<CrmLead[]>([])
   const [templates, setTemplates] = useState<CrmMessageTemplate[]>([])
+  const [smartFollowups, setSmartFollowups] = useState<CrmSmartFollowup[]>([])
   const [referenceNow, setReferenceNow] = useState<string | null>(null)
   const [status, setStatus] = useState<'all' | CrmLead['status']>('all')
   const [source, setSource] = useState('all')
@@ -23,19 +24,21 @@ export default function CrmFollowUpsPage() {
   useEffect(() => {
     let active = true
     async function bootstrap() {
-      const [leadRes, templateData, sourceStats] = await Promise.all([
+      const [leadRes, templateData, sourceStats, smartData] = await Promise.all([
         supabase
           .from('crm_leads')
           .select('*, center:centers(*), assignee:profiles!crm_leads_assigned_to_fkey(id, full_name, role), student:students(*)')
           .order('next_follow_up_at', { ascending: true }),
         getCrmMessageTemplates(),
         getCrmSourceStats(),
+        getCrmSmartFollowups(),
       ])
 
       if (!active) return
       setLeads((leadRes.data || []) as CrmLead[])
       setTemplates(templateData)
       setSources(sourceStats.map((entry) => entry.source))
+      setSmartFollowups(smartData)
       setReferenceNow(new Date().toISOString())
       setLoading(false)
     }
@@ -129,6 +132,43 @@ export default function CrmFollowUpsPage() {
         <div className="card" style={{ padding: '2rem', textAlign: 'center', color: '#64748b' }}>Chargement...</div>
       ) : (
         <div style={{ display: 'grid', gap: '1rem' }}>
+          <section className="card" style={{ display: 'grid', gap: '0.85rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#991b1b' }}>Smart follow-up engine</h2>
+              <span style={{ color: '#64748b' }}>{smartFollowups.length} alerte(s)</span>
+            </div>
+
+            {smartFollowups.length === 0 ? (
+              <div style={{ color: '#64748b' }}>Aucune alerte intelligente active.</div>
+            ) : (
+              <div style={{ display: 'grid', gap: '0.8rem' }}>
+                {smartFollowups.map((item) => {
+                  const lead = item.lead_id ? leads.find((entry) => entry.id === item.lead_id) || null : null
+                  return (
+                    <article key={item.id} style={{ border: '1px solid #e2e8f0', borderRadius: 16, padding: '0.9rem', background: item.severity === 'high' ? '#fff7ed' : '#f8fafc', display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: 6, flexWrap: 'wrap' }}>
+                          <strong>{item.title}</strong>
+                          <span style={{ color: item.severity === 'high' ? '#c2410c' : '#0f766e', fontSize: '0.78rem', fontWeight: 800, textTransform: 'uppercase' }}>
+                            {item.severity}
+                          </span>
+                        </div>
+                        <div style={{ color: '#334155', marginBottom: 4 }}>{item.detail}</div>
+                        <div style={{ color: '#64748b', fontSize: '0.84rem' }}>
+                          {item.due_at ? `Échéance : ${formatDateTime(item.due_at)}` : 'Action à traiter aujourd’hui'}
+                          {lead ? ` · Prospect : ${lead.parent_name}` : ''}
+                        </div>
+                      </div>
+                      {item.lead_id ? (
+                        <Link href={`/admin/crm/${item.lead_id}`} className="btn btn-secondary btn-sm">Ouvrir</Link>
+                      ) : null}
+                    </article>
+                  )
+                })}
+              </div>
+            )}
+          </section>
+
           {sections.map((section) => (
             <section key={section.key} className="card" style={{ display: 'grid', gap: '0.85rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>

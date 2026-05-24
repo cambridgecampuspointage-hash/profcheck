@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { createCorrectionRequest } from '@/lib/actions'
+import { AiSummaryCard } from '@/components/ai/AiSummaryCard'
 import type { AttendanceCorrectionRequest, AttendanceSession } from '@/lib/types'
 import { formatDate, formatDateTime, formatTime, minutesToHoursMinutes } from '@/lib/utils'
 import { FilePenLine, History as HistoryIcon, Loader2, X } from 'lucide-react'
@@ -48,6 +49,17 @@ export default function TeacherHistoryClient({
 
   return (
     <div className="page-enter">
+      <div style={{ marginBottom: '1rem' }}>
+        <AiSummaryCard
+          title="Synthèse IA des notes prof"
+          subtitle="Résumé automatique de tes dernières notes de séance et des points à signaler."
+          endpoint="/api/ai/teacher-notes"
+          tone="#1d4ed8"
+          autoLoad={false}
+          actionLabel="Générer"
+        />
+      </div>
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
         <h1 style={{ fontSize: '1.25rem', fontWeight: 700 }}>
           <HistoryIcon size={20} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />

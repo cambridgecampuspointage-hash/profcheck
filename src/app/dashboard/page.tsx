@@ -4,6 +4,7 @@ import type { CSSProperties } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, RefreshCcw } from 'lucide-react'
+import { AiSummaryCard } from '@/components/ai/AiSummaryCard'
 import { createClient } from '@/lib/supabase/client'
 import type { AttendanceSession, Room, Teacher } from '@/lib/types'
 import { computeTodayKpis } from '@/lib/kpis/computeAdminKpis'
@@ -347,6 +348,13 @@ export default function DashboardPage() {
       }}
     >
       <div style={{ maxWidth: 1400, margin: '0 auto', display: 'grid', gap: '1.2rem' }}>
+        <AiSummaryCard
+          title="Analyse IA des anomalies"
+          subtitle="Lecture rapide des écarts entre planning, pointage, CRM et recouvrement."
+          endpoint="/api/ai/dashboard-anomalies"
+          tone="#7c3aed"
+        />
+
         <header
           style={{
             background: '#FFFFFF',

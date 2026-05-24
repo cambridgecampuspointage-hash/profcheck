@@ -6,20 +6,22 @@ import { useEffect, useState } from 'react'
 import {
   addCrmLeadNote,
   convertCrmLeadToStudent,
+  createCrmActivity,
   createCrmTask,
   deleteCrmLead,
   getCenters,
+  getCrmActivities,
   getCrmAssignableUsers,
   getCrmLeadById,
   getCrmMessageTemplates,
   getCrmNotes,
   getCrmTasks,
+  getRecommendedClassesForLead,
   updateCrmLead,
   updateCrmMessageTemplate,
   updateCrmTaskStatus,
 } from '@/lib/actions'
-import type { Center, CrmLead, CrmNote, CrmTask, Profile } from '@/lib/types'
-import type { CrmMessageTemplate } from '@/lib/types'
+import type { Center, CrmActivity, CrmLead, CrmMessageTemplate, CrmNote, CrmRecommendedClassMatch, CrmTask, Profile } from '@/lib/types'
 import { CrmQuickActions } from '../components/CrmQuickActions'
 import { LeadForm } from '../components/LeadForm'
 import { CRM_STATUS_OPTIONS, CRM_STATUS_STYLES, formatDateTime } from '../components/crm-config'
@@ -30,6 +32,8 @@ export function LeadDetailClient({ leadId }: { leadId: string }) {
   const [lead, setLead] = useState<CrmLead | null>(null)
   const [notes, setNotes] = useState<CrmNote[]>([])
   const [tasks, setTasks] = useState<CrmTask[]>([])
+  const [activities, setActivities] = useState<CrmActivity[]>([])
+  const [recommendedClasses, setRecommendedClasses] = useState<CrmRecommendedClassMatch[]>([])
   const [referenceNow, setReferenceNow] = useState<string | null>(null)
   const [centers, setCenters] = useState<Center[]>([])
   const [assignableUsers, setAssignableUsers] = useState<Profile[]>([])
@@ -41,23 +45,28 @@ export function LeadDetailClient({ leadId }: { leadId: string }) {
   const [converting, setConverting] = useState(false)
   const [savingTemplateId, setSavingTemplateId] = useState<string | null>(null)
   const [deletingLead, setDeletingLead] = useState(false)
+  const [loggingActivity, setLoggingActivity] = useState<string | null>(null)
 
   const loadData = async () => {
-    const [leadData, notesData, tasksData, centerData, userData, templateData] = await Promise.all([
+    const [leadData, notesData, tasksData, activityData, centerData, userData, templateData, recommendations] = await Promise.all([
       getCrmLeadById(leadId),
       getCrmNotes(leadId),
       getCrmTasks(leadId),
+      getCrmActivities(leadId),
       getCenters(),
       getCrmAssignableUsers(),
       getCrmMessageTemplates(),
+      getRecommendedClassesForLead(leadId),
     ])
 
     setLead(leadData)
     setNotes(notesData)
     setTasks(tasksData)
+    setActivities(activityData)
     setCenters(centerData as Center[])
     setAssignableUsers(userData)
     setTemplates(templateData)
+    setRecommendedClasses(recommendations)
     setTaskAssignee(leadData?.assigned_to || '')
     setReferenceNow(new Date().toISOString())
     setLoading(false)
@@ -67,13 +76,15 @@ export function LeadDetailClient({ leadId }: { leadId: string }) {
     let active = true
 
     async function bootstrap() {
-      const [leadData, notesData, tasksData, centerData, userData, templateData] = await Promise.all([
+      const [leadData, notesData, tasksData, activityData, centerData, userData, templateData, recommendations] = await Promise.all([
         getCrmLeadById(leadId),
         getCrmNotes(leadId),
         getCrmTasks(leadId),
+        getCrmActivities(leadId),
         getCenters(),
         getCrmAssignableUsers(),
         getCrmMessageTemplates(),
+        getRecommendedClassesForLead(leadId),
       ])
 
       if (!active) return
@@ -81,9 +92,11 @@ export function LeadDetailClient({ leadId }: { leadId: string }) {
       setLead(leadData)
       setNotes(notesData)
       setTasks(tasksData)
+      setActivities(activityData)
       setCenters(centerData as Center[])
       setAssignableUsers(userData)
       setTemplates(templateData)
+      setRecommendedClasses(recommendations)
       setTaskAssignee(leadData?.assigned_to || '')
       setReferenceNow(new Date().toISOString())
       setLoading(false)
@@ -295,6 +308,72 @@ export function LeadDetailClient({ leadId }: { leadId: string }) {
 
           <CrmQuickActions lead={lead} templates={templates} />
 
+          <div style={{ display: 'flex', gap: '0.55rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={loggingActivity === 'call'}
+              onClick={async () => {
+                setLoggingActivity('call')
+                const result = await createCrmActivity({ lead_id: lead.id, activity_type: 'call' })
+                setLoggingActivity(null)
+                if (result.error) {
+                  window.alert(result.error)
+                  return
+                }
+                await loadData()
+              }}
+            >
+              {loggingActivity === 'call' ? 'Journalisation...' : 'Journaliser appel'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={loggingActivity === 'whatsapp'}
+              onClick={async () => {
+                setLoggingActivity('whatsapp')
+                const result = await createCrmActivity({ lead_id: lead.id, activity_type: 'whatsapp' })
+                setLoggingActivity(null)
+                if (result.error) {
+                  window.alert(result.error)
+                  return
+                }
+                await loadData()
+              }}
+            >
+              {loggingActivity === 'whatsapp' ? 'Journalisation...' : 'Journaliser WhatsApp'}
+            </button>
+          </div>
+
+          <div style={{ borderTop: '1px solid #e2e8f0' }} />
+
+          <div>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 800, marginBottom: 4 }}>Classes recommandées</h2>
+            <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Suggestions automatiques basées sur le niveau, l’âge et la disponibilité.</p>
+          </div>
+
+          <div style={{ display: 'grid', gap: '0.75rem' }}>
+            {recommendedClasses.length === 0 ? (
+              <div style={{ color: '#64748b' }}>Aucune classe recommandée pour le moment.</div>
+            ) : recommendedClasses.map((entry) => (
+              <div key={entry.class_id} style={{ border: '1px solid #e2e8f0', borderRadius: 14, padding: '0.9rem 1rem', background: '#fff' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', marginBottom: 6 }}>
+                  <strong>{entry.class_name}</strong>
+                  <span style={{ color: '#0f766e', fontWeight: 800 }}>{entry.score} pts</span>
+                </div>
+                <div style={{ color: '#334155', fontSize: '0.9rem', marginBottom: 6 }}>
+                  Niveau {entry.level || '—'} · Audience {entry.audience || '—'}
+                </div>
+                <div style={{ color: '#64748b', fontSize: '0.84rem', marginBottom: 6 }}>
+                  Prochaine séance : {formatDateTime(entry.next_session_at)}
+                </div>
+                <div style={{ color: '#64748b', fontSize: '0.84rem' }}>
+                  {entry.rationale.join(' · ')}
+                </div>
+              </div>
+            ))}
+          </div>
+
           <div style={{ borderTop: '1px solid #e2e8f0' }} />
 
           <div>
@@ -408,6 +487,37 @@ export function LeadDetailClient({ leadId }: { leadId: string }) {
           ) : null}
         </div>
       </div>
+
+      <div className="card" style={{ display: 'grid', gap: '1rem' }}>
+        <div>
+          <h2 style={{ fontSize: '1.05rem', fontWeight: 800, marginBottom: 4 }}>CRM activity timeline</h2>
+          <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Historique propre des événements automatiques et manuels sur ce prospect.</p>
+        </div>
+
+        <div style={{ display: 'grid', gap: '0.9rem' }}>
+          {activities.length === 0 ? (
+            <div style={{ color: '#64748b' }}>Aucune activité CRM enregistrée.</div>
+          ) : activities.map((activity) => (
+            <div key={activity.id} style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '1rem', alignItems: 'start' }}>
+              <div style={{ color: '#64748b', fontSize: '0.82rem', fontWeight: 700 }}>
+                {new Date(activity.created_at).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+              </div>
+              <div style={{ borderLeft: '2px solid #e2e8f0', paddingLeft: '1rem', paddingBottom: '0.35rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap', marginBottom: 4 }}>
+                  <strong>{activity.title}</strong>
+                  <span style={{ color: '#64748b', fontSize: '0.82rem' }}>{formatDateTime(activity.created_at)}</span>
+                </div>
+                {activity.detail ? (
+                  <div style={{ color: '#334155', marginBottom: 4 }}>{activity.detail}</div>
+                ) : null}
+                <div style={{ color: '#64748b', fontSize: '0.82rem' }}>
+                  {activity.actor?.full_name || 'Système'} · {formatActivityType(activity.activity_type)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -475,4 +585,22 @@ function TemplateEditorCard({
       </div>
     </div>
   )
+}
+
+function formatActivityType(value: CrmActivity['activity_type']) {
+  const labels: Record<CrmActivity['activity_type'], string> = {
+    call: 'Appel',
+    whatsapp: 'WhatsApp',
+    note: 'Note',
+    test_completed: 'Test terminé',
+    trial_scheduled: 'Essai planifié',
+    payment_followup: 'Suivi paiement',
+    status_change: 'Changement de statut',
+    enrollment: 'Inscription',
+    telegram_alert: 'Alerte Telegram',
+    follow_up_reminder: 'Relance',
+    class_recommendation: 'Classe recommandée',
+  }
+
+  return labels[value]
 }

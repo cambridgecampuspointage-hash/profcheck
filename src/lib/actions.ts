@@ -1,6 +1,7 @@
 'use server'
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { logCrmActivity } from '@/lib/crm/activity'
 import { matchAttendanceToPlanning } from '@/lib/planning/matchSessionToPlanning'
 import { createClient } from '@/lib/supabase/server'
 import { calculateDistanceMeters } from '@/lib/gps'
@@ -13,6 +14,8 @@ import type {
   TeacherReport,
   AttendanceSession,
   AttendanceCorrectionRequest,
+  CrmActivity,
+  CrmActivityType,
   CrmDashboardStats,
   CrmLead,
   CrmLeadStatus,
@@ -27,6 +30,8 @@ import type {
   CrmTaskStatus,
   CrmTaskType,
   CrmAnalyticsSummary,
+  CrmRecommendedClassMatch,
+  CrmSmartFollowup,
   Profile,
   ReceptionUser,
   Student,
@@ -1956,6 +1961,16 @@ type CrmTaskPayload = {
   status?: CrmTaskStatus
 }
 
+type ActivityUpsertPayload = {
+  type: CrmActivityType
+  title: string
+  detail?: string | null
+  leadId?: string | null
+  studentId?: string | null
+  actorId?: string | null
+  metadata?: Record<string, unknown>
+}
+
 type ScoreFactor = { label: string; score: number }
 
 function normalizeEmail(value?: string | null) {
@@ -1991,6 +2006,47 @@ function getLeadTemperature(score: number): CrmLeadTemperature {
   if (score >= 70) return 'hot'
   if (score >= 40) return 'warm'
   return 'cold'
+}
+
+function normalizeAudienceToPlanningAudience(value?: string | null) {
+  if (!value) return null
+  return value === 'junior' ? ['kids', 'teens'] : ['adults']
+}
+
+function extractAvailabilityTokens(value?: string | null) {
+  const text = (value || '').toLowerCase()
+  const tokens: string[] = []
+  const dayPairs = [
+    ['lundi', 'monday'],
+    ['mardi', 'tuesday'],
+    ['mercredi', 'wednesday'],
+    ['jeudi', 'thursday'],
+    ['vendredi', 'friday'],
+    ['samedi', 'saturday'],
+    ['dimanche', 'sunday'],
+  ] as const
+
+  dayPairs.forEach(([fr, en]) => {
+    if (text.includes(fr) || text.includes(en)) tokens.push(en)
+  })
+
+  if (text.includes('matin') || text.includes('morning')) tokens.push('morning')
+  if (text.includes('après-midi') || text.includes('apres-midi') || text.includes('afternoon')) tokens.push('afternoon')
+  if (text.includes('soir') || text.includes('evening')) tokens.push('evening')
+
+  return tokens
+}
+
+async function recordCrmActivity(admin: ReturnType<typeof createAdminClient>, payload: ActivityUpsertPayload) {
+  await logCrmActivity(admin, {
+    lead_id: payload.leadId,
+    student_id: payload.studentId,
+    actor_id: payload.actorId,
+    activity_type: payload.type,
+    title: payload.title,
+    detail: payload.detail,
+    metadata: payload.metadata,
+  })
 }
 
 function buildLeadScoreFactors(params: {
@@ -2366,6 +2422,12 @@ export async function updateCrmPaymentFollowup(
   if (!user || role !== 'admin') return { error: 'Accès refusé' }
 
   const admin = createAdminClient()
+  const { data: existingFollowup } = await admin
+    .from('crm_payment_followups')
+    .select('lead_id, student_id, status, promised_payment_date')
+    .eq('id', followupId)
+    .maybeSingle()
+
   const { error } = await admin
     .from('crm_payment_followups')
     .update({
@@ -2376,6 +2438,23 @@ export async function updateCrmPaymentFollowup(
     .eq('id', followupId)
 
   if (error) return { error: error.message }
+
+  if (existingFollowup?.lead_id || existingFollowup?.student_id) {
+    await recordCrmActivity(admin, {
+      leadId: existingFollowup?.lead_id || undefined,
+      studentId: existingFollowup?.student_id || undefined,
+      actorId: user.id,
+      type: 'payment_followup',
+      title: 'Payment follow-up updated',
+      detail: payload.notes || `Payment follow-up status updated to ${payload.status || existingFollowup?.status || 'unchanged'}.`,
+      metadata: {
+        previous_status: existingFollowup?.status || null,
+        next_status: payload.status || existingFollowup?.status || null,
+        promised_payment_date: payload.promised_payment_date ?? existingFollowup?.promised_payment_date ?? null,
+      },
+    })
+  }
+
   return { success: true }
 }
 
@@ -2426,7 +2505,7 @@ export async function getCrmLeadById(leadId: string): Promise<CrmLead | null> {
   const admin = createAdminClient()
   const { data } = await admin
     .from('crm_leads')
-    .select('*, center:centers(*), assignee:profiles!crm_leads_assigned_to_fkey(id, full_name, role), student:students(*)')
+    .select('*, center:centers(*), assignee:profiles!crm_leads_assigned_to_fkey(id, full_name, role), student:students(*), recommended_class:student_classes(*)')
     .eq('id', leadId)
     .maybeSingle()
 
@@ -2459,6 +2538,295 @@ export async function getCrmTasks(leadId: string): Promise<CrmTask[]> {
     .order('due_at')
 
   return (data || []) as CrmTask[]
+}
+
+export async function getCrmActivities(leadId: string): Promise<CrmActivity[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  const { data } = await admin
+    .from('crm_activities')
+    .select('*, actor:profiles(id, full_name, role), student:students(*)')
+    .eq('lead_id', leadId)
+    .order('created_at', { ascending: false })
+
+  return (data || []) as CrmActivity[]
+}
+
+export async function createCrmActivity(payload: {
+  lead_id: string
+  activity_type: CrmActivityType
+  title?: string | null
+  detail?: string | null
+}) {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return { error: 'Accès refusé' }
+
+  const defaultTitles: Record<CrmActivityType, string> = {
+    call: 'Parent called',
+    whatsapp: 'WhatsApp message sent',
+    note: 'Note added',
+    test_completed: 'English Quest completed',
+    trial_scheduled: 'Trial scheduled',
+    payment_followup: 'Payment follow-up',
+    status_change: 'Status changed',
+    enrollment: 'Converted to student',
+    telegram_alert: 'Telegram alert sent',
+    follow_up_reminder: 'Follow-up reminder created',
+    class_recommendation: 'Recommended class updated',
+  }
+
+  const admin = createAdminClient()
+  await recordCrmActivity(admin, {
+    leadId: payload.lead_id,
+    actorId: user.id,
+    type: payload.activity_type,
+    title: payload.title?.trim() || defaultTitles[payload.activity_type],
+    detail: payload.detail || null,
+  })
+
+  return { success: true }
+}
+
+export async function getCrmSmartFollowups(): Promise<CrmSmartFollowup[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  await refreshCrmLeadScores()
+  await syncCrmPaymentFollowups()
+
+  const admin = createAdminClient()
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  const startOfDayAfter = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 2)
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+
+  const [leadsRes, activitiesRes, hotRes, paymentRes, attendanceRes] = await Promise.all([
+    admin.from('crm_leads').select('*, student:students(*)'),
+    admin.from('crm_activities').select('lead_id, student_id, activity_type, created_at'),
+    admin.from('crm_lead_scores').select('lead_id, temperature'),
+    admin.from('crm_payment_followups').select('*, student:students(*), lead:crm_leads(*)').eq('status', 'promised'),
+    admin.from('student_attendance').select('student_id, attendance_date, status, student:students(*)').eq('status', 'absent').gte('attendance_date', startOfMonth.slice(0, 10)),
+  ])
+
+  const leads = (leadsRes.data || []) as CrmLead[]
+  const activities = (activitiesRes.data || []) as Array<{ lead_id: string | null; student_id: string | null; activity_type: CrmActivityType; created_at: string }>
+  const hotLeadIds = new Set((hotRes.data || []).filter((row) => row.temperature === 'hot').map((row) => row.lead_id))
+  const smart: CrmSmartFollowup[] = []
+
+  leads.forEach((lead) => {
+    if (lead.placement_test_completed_at && new Date(lead.placement_test_completed_at) <= yesterday) {
+      const calledAfterTest = activities.some((activity) =>
+        activity.lead_id === lead.id &&
+        activity.activity_type === 'call' &&
+        new Date(activity.created_at) >= new Date(lead.placement_test_completed_at as string),
+      )
+
+      if (!calledAfterTest) {
+        smart.push({
+          id: `test-no-call-${lead.id}`,
+          kind: 'test_completed_no_call',
+          severity: 'high',
+          title: 'Test completed but no call after 24h',
+          detail: `${lead.parent_name} has completed the English Quest, but no call was logged after 24h.`,
+          lead_id: lead.id,
+          student_id: lead.converted_student_id,
+          due_at: lead.placement_test_completed_at,
+        })
+      }
+    }
+
+    if (hotLeadIds.has(lead.id)) {
+      const contactedToday = activities.some((activity) =>
+        activity.lead_id === lead.id &&
+        ['call', 'whatsapp', 'note', 'status_change'].includes(activity.activity_type) &&
+        new Date(activity.created_at) >= startOfToday,
+      )
+
+      if (!contactedToday) {
+        smart.push({
+          id: `hot-today-${lead.id}`,
+          kind: 'hot_lead_not_contacted',
+          severity: 'high',
+          title: 'Hot lead not contacted today',
+          detail: `${lead.parent_name} is a hot lead and still has no contact logged today.`,
+          lead_id: lead.id,
+          student_id: lead.converted_student_id,
+        })
+      }
+    }
+
+    if (lead.trial_date) {
+      const trialDate = new Date(lead.trial_date)
+      if (trialDate >= startOfTomorrow && trialDate < startOfDayAfter) {
+        smart.push({
+          id: `trial-tomorrow-${lead.id}`,
+          kind: 'trial_tomorrow',
+          severity: 'medium',
+          title: 'Trial scheduled tomorrow',
+          detail: `${lead.student_name} has a trial/test scheduled tomorrow.`,
+          lead_id: lead.id,
+          student_id: lead.converted_student_id,
+          due_at: lead.trial_date,
+        })
+      }
+    }
+  })
+
+  ;((paymentRes.data || []) as CrmPaymentFollowup[]).forEach((followup) => {
+    const promisedDate = followup.promised_payment_date ? new Date(`${followup.promised_payment_date}T00:00:00`) : null
+    if (!promisedDate || promisedDate > now) return
+
+    smart.push({
+      id: `payment-promise-${followup.id}`,
+      kind: 'promised_payment_missing',
+      severity: 'high',
+      title: 'Promised payment still missing',
+      detail: `${followup.student?.parent_name || followup.lead?.parent_name || 'Parent'} promised payment, but nothing has been recorded yet.`,
+      lead_id: followup.lead_id,
+      student_id: followup.student_id,
+      due_at: followup.promised_payment_date,
+    })
+  })
+
+  const attendanceRows = (attendanceRes.data || []) as Array<{ student_id: string; attendance_date: string; status: 'absent'; student: Student | null }>
+  const absenceCount = new Map<string, { count: number; student: Student | null }>()
+  attendanceRows.forEach((row) => {
+    const current = absenceCount.get(row.student_id) || { count: 0, student: row.student }
+    current.count += 1
+    absenceCount.set(row.student_id, current)
+  })
+
+  absenceCount.forEach((entry, studentId) => {
+    if (entry.count < 2) return
+    const linkedLead = leads.find((lead) => lead.converted_student_id === studentId)
+    smart.push({
+      id: `absent-twice-${studentId}`,
+      kind: 'student_absent_twice',
+      severity: 'medium',
+      title: 'Student absent 2 times this month',
+      detail: `${entry.student?.full_name || 'Student'} has already been absent ${entry.count} times this month.`,
+      lead_id: linkedLead?.id || null,
+      student_id: studentId,
+    })
+  })
+
+  return smart
+}
+
+export async function getRecommendedClassesForLead(leadId: string): Promise<CrmRecommendedClassMatch[]> {
+  const { user, role } = await getSessionContext()
+  if (!user || role !== 'admin') return []
+
+  const admin = createAdminClient()
+  const { data: lead } = await admin
+    .from('crm_leads')
+    .select('*')
+    .eq('id', leadId)
+    .maybeSingle()
+
+  if (!lead) return []
+
+  const { data: classes } = await admin
+    .from('student_classes')
+    .select('id, name, level, center_id, status')
+    .eq('status', 'active')
+    .order('name')
+
+  const { data: sessions } = await admin
+    .from('planned_sessions')
+    .select('id, class_id, scheduled_date, start_time, audience, status')
+    .gte('scheduled_date', formatDateKey(new Date()))
+    .eq('status', 'scheduled')
+    .order('scheduled_date')
+    .order('start_time')
+
+  const leadLevel = (lead.placement_test_level || lead.student_level || '').toLowerCase()
+  const availabilityTokens = extractAvailabilityTokens(lead.availability)
+  const preferredAudiences = normalizeAudienceToPlanningAudience(lead.audience)
+
+  const sessionMap = new Map<string, Array<{ scheduled_date: string; start_time: string; audience: string | null }>>()
+  ;(sessions || []).forEach((session) => {
+    if (!session.class_id) return
+    const current = sessionMap.get(session.class_id) || []
+    current.push({
+      scheduled_date: session.scheduled_date,
+      start_time: session.start_time,
+      audience: session.audience,
+    })
+    sessionMap.set(session.class_id, current)
+  })
+
+  const recommendations = ((classes || []) as Array<{ id: string; name: string; level: string | null; center_id: string | null; status: string }>).map((studentClass) => {
+    let score = 0
+    const rationale: string[] = []
+    const upcomingSessions = sessionMap.get(studentClass.id) || []
+    const nextSession = upcomingSessions[0]
+    const classLevel = (studentClass.level || '').toLowerCase()
+
+    if (lead.center_id && studentClass.center_id === lead.center_id) {
+      score += 15
+      rationale.push('Same center')
+    }
+
+    if (leadLevel && classLevel.includes(leadLevel)) {
+      score += 45
+      rationale.push('Level match')
+    }
+
+    if (preferredAudiences && nextSession?.audience && preferredAudiences.includes(nextSession.audience)) {
+      score += 20
+      rationale.push('Audience match')
+    }
+
+    if (nextSession && availabilityTokens.length > 0) {
+      const sessionDate = new Date(`${nextSession.scheduled_date}T12:00:00`)
+      const weekday = sessionDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()
+      const hour = Number(nextSession.start_time.slice(0, 2))
+      const slot = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'
+
+      if (availabilityTokens.includes(weekday)) {
+        score += 12
+        rationale.push('Day availability match')
+      }
+      if (availabilityTokens.includes(slot)) {
+        score += 8
+        rationale.push('Time availability match')
+      }
+    }
+
+    return {
+      class_id: studentClass.id,
+      class_name: studentClass.name,
+      level: studentClass.level,
+      audience: nextSession?.audience || null,
+      next_session_at: nextSession ? `${nextSession.scheduled_date}T${nextSession.start_time}` : null,
+      score,
+      rationale,
+    } satisfies CrmRecommendedClassMatch
+  })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+
+  const best = recommendations[0]
+  if (best) {
+    await admin
+      .from('crm_leads')
+      .update({
+        recommended_class_id: best.class_id,
+        placement_test_recommended_class: best.next_session_at
+          ? `${best.class_name} · ${best.next_session_at.slice(0, 10)} ${best.next_session_at.slice(11, 16)}`
+          : best.class_name,
+        program_interest: lead.program_interest || best.class_name,
+      })
+      .eq('id', leadId)
+  }
+
+  return recommendations
 }
 
 export async function createCrmLead(payload: CrmLeadPayload) {
@@ -2495,6 +2863,29 @@ export async function updateCrmLead(leadId: string, payload: Partial<CrmLeadPayl
     .eq('id', leadId)
 
   if (error) return { error: error.message }
+
+  if (normalized.status) {
+    await recordCrmActivity(admin, {
+      leadId,
+      actorId: user.id,
+      type: 'status_change',
+      title: 'Status changed',
+      detail: `Lead status updated to ${normalized.status}.`,
+      metadata: { status: normalized.status },
+    })
+  }
+
+  if (normalized.trial_date) {
+    await recordCrmActivity(admin, {
+      leadId,
+      actorId: user.id,
+      type: 'trial_scheduled',
+      title: 'Trial scheduled',
+      detail: `Trial scheduled for ${normalized.trial_date}.`,
+      metadata: { trial_date: normalized.trial_date },
+    })
+  }
+
   return { success: true }
 }
 
@@ -2515,6 +2906,15 @@ export async function addCrmLeadNote(leadId: string, note: string) {
     })
 
   if (error) return { error: error.message }
+
+  await recordCrmActivity(admin, {
+    leadId,
+    actorId: user.id,
+    type: 'note',
+    title: 'Note added',
+    detail: content,
+  })
+
   return { success: true }
 }
 
@@ -2550,12 +2950,41 @@ export async function updateCrmLeadStatus(leadId: string, status: CrmLeadStatus)
     payload.trial_date = null
   }
 
+  const { data: leadBefore } = await admin
+    .from('crm_leads')
+    .select('status, trial_date')
+    .eq('id', leadId)
+    .maybeSingle()
+
   const { error } = await admin
     .from('crm_leads')
     .update(payload)
     .eq('id', leadId)
 
   if (error) return { error: error.message }
+
+  if (leadBefore?.status !== status) {
+    await recordCrmActivity(admin, {
+      leadId,
+      actorId: user.id,
+      type: 'status_change',
+      title: 'Status changed',
+      detail: `${leadBefore?.status || 'unknown'} → ${status}`,
+      metadata: { previous_status: leadBefore?.status || null, next_status: status },
+    })
+  }
+
+  if (status === 'trial_scheduled') {
+    await recordCrmActivity(admin, {
+      leadId,
+      actorId: user.id,
+      type: 'trial_scheduled',
+      title: 'Trial scheduled',
+      detail: payload.trial_date ? `Trial scheduled for ${payload.trial_date}.` : 'Trial status has been scheduled.',
+      metadata: { trial_date: payload.trial_date || null },
+    })
+  }
+
   return { success: true }
 }
 
@@ -2587,6 +3016,19 @@ export async function createCrmTask(payload: CrmTaskPayload) {
       next_follow_up_at: payload.due_at,
     })
     .eq('id', payload.lead_id)
+
+  await recordCrmActivity(admin, {
+    leadId: payload.lead_id,
+    actorId: user.id,
+    type: 'follow_up_reminder',
+    title: 'Follow-up reminder created',
+    detail: `${title} · due ${payload.due_at}`,
+    metadata: {
+      due_at: payload.due_at,
+      assigned_to: payload.assigned_to || null,
+      task_type: payload.task_type || 'follow_up',
+    },
+  })
 
   return { success: true }
 }
@@ -2657,6 +3099,16 @@ export async function convertCrmLeadToStudent(leadId: string) {
       author_id: user.id,
       note: `Prospect converti en étudiant (${student.id}).`,
     })
+
+  await recordCrmActivity(admin, {
+    leadId,
+    studentId: student.id,
+    actorId: user.id,
+    type: 'enrollment',
+    title: 'Converted to student',
+    detail: `Lead converted to student ${student.id}.`,
+    metadata: { student_id: student.id },
+  })
 
   return { success: true, studentId: student.id }
 }

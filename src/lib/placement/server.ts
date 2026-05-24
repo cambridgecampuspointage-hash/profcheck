@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/admin'
+import { logCrmActivity } from '@/lib/crm/activity'
 import { evaluatePlacementAttempt } from '@/lib/placement/quest'
 import type { PlacementAttempt, PlacementQuestion, PlacementQuestionPublic } from '@/lib/types'
 import { buildPlacementTestCompletedMessage } from '@/lib/telegram/alertMessages'
@@ -17,6 +18,126 @@ function normalizeName(value: string) {
 
 function normalizeComparableName(value: string) {
   return normalizeName(value).toLowerCase()
+}
+
+function extractAvailabilityTokens(value: string | null) {
+  if (!value) return []
+  const normalized = value.toLowerCase()
+  const tokens = new Set<string>()
+
+  const dayMap: Record<string, string[]> = {
+    monday: ['monday', 'lundi'],
+    tuesday: ['tuesday', 'mardi'],
+    wednesday: ['wednesday', 'mercredi'],
+    thursday: ['thursday', 'jeudi'],
+    friday: ['friday', 'vendredi'],
+    saturday: ['saturday', 'samedi'],
+    sunday: ['sunday', 'dimanche'],
+  }
+
+  Object.entries(dayMap).forEach(([canonical, variants]) => {
+    if (variants.some((variant) => normalized.includes(variant))) tokens.add(canonical)
+  })
+
+  if (/(matin|morning)/.test(normalized)) tokens.add('morning')
+  if (/(apres-midi|après-midi|afternoon)/.test(normalized)) tokens.add('afternoon')
+  if (/(soir|evening|night)/.test(normalized)) tokens.add('evening')
+
+  return Array.from(tokens)
+}
+
+async function recommendClassForLead(leadId: string) {
+  const admin = createAdminClient()
+  const { data: lead } = await admin
+    .from('crm_leads')
+    .select('*')
+    .eq('id', leadId)
+    .maybeSingle()
+
+  if (!lead) return null
+
+  const [{ data: classes }, { data: sessions }] = await Promise.all([
+    admin.from('student_classes').select('id, name, level, center_id, status').eq('status', 'active').order('name'),
+    admin
+      .from('planned_sessions')
+      .select('class_id, scheduled_date, start_time, audience, status')
+      .gte('scheduled_date', new Date().toISOString().slice(0, 10))
+      .eq('status', 'scheduled')
+      .order('scheduled_date')
+      .order('start_time'),
+  ])
+
+  const availabilityTokens = extractAvailabilityTokens(lead.availability)
+  const leadLevel = (lead.placement_test_level || lead.student_level || '').toLowerCase()
+  const preferredAudiences = lead.audience === 'junior' ? ['kids', 'teens'] : lead.audience === 'adult' ? ['adults'] : []
+  const sessionMap = new Map<string, Array<{ scheduled_date: string; start_time: string; audience: string | null }>>()
+
+  ;(sessions || []).forEach((session) => {
+    if (!session.class_id) return
+    const current = sessionMap.get(session.class_id) || []
+    current.push({
+      scheduled_date: session.scheduled_date,
+      start_time: session.start_time,
+      audience: session.audience,
+    })
+    sessionMap.set(session.class_id, current)
+  })
+
+  const matches = (classes || [])
+    .map((studentClass) => {
+      const nextSession = sessionMap.get(studentClass.id)?.[0] || null
+      let score = 0
+
+      if (lead.center_id && studentClass.center_id === lead.center_id) score += 15
+      if (leadLevel && (studentClass.level || '').toLowerCase().includes(leadLevel)) score += 45
+      if (nextSession?.audience && preferredAudiences.includes(nextSession.audience)) score += 20
+
+      if (nextSession && availabilityTokens.length > 0) {
+        const date = new Date(`${nextSession.scheduled_date}T12:00:00`)
+        const weekday = date.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase()
+        const hour = Number(nextSession.start_time.slice(0, 2))
+        const slot = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'
+        if (availabilityTokens.includes(weekday)) score += 12
+        if (availabilityTokens.includes(slot)) score += 8
+      }
+
+      return { studentClass, nextSession, score }
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+
+  const best = matches[0]
+  if (!best) return null
+
+  const recommendedLabel = best.nextSession
+    ? `${best.studentClass.name} · ${best.nextSession.scheduled_date} ${best.nextSession.start_time.slice(0, 5)}`
+    : best.studentClass.name
+
+  await admin
+    .from('crm_leads')
+    .update({
+      recommended_class_id: best.studentClass.id,
+      placement_test_recommended_class: recommendedLabel,
+      program_interest: recommendedLabel,
+    })
+    .eq('id', leadId)
+
+  await logCrmActivity(admin, {
+    lead_id: leadId,
+    activity_type: 'class_recommendation',
+    title: 'Recommended class updated',
+    detail: recommendedLabel,
+    metadata: {
+      class_id: best.studentClass.id,
+      class_name: best.studentClass.name,
+      score: best.score,
+      next_session_at: best.nextSession
+        ? `${best.nextSession.scheduled_date}T${best.nextSession.start_time}`
+        : null,
+    },
+  })
+
+  return recommendedLabel
 }
 
 async function getActiveEnglishQuestions() {
@@ -298,6 +419,7 @@ export async function completeEnglishQuest(attemptId: string) {
   })
 
   const completedAt = new Date().toISOString()
+  let recommendedLabel: string | null = null
 
   const { error: updateAttemptError } = await admin
     .from('placement_attempts')
@@ -340,12 +462,36 @@ export async function completeEnglishQuest(attemptId: string) {
       })
       .eq('id', typedAttempt.lead_id)
 
+    await logCrmActivity(admin, {
+      lead_id: typedAttempt.lead_id,
+      activity_type: 'test_completed',
+      title: 'English Quest completed',
+      detail: `${evaluation.badge} · ${evaluation.estimatedLevel} · ${evaluation.rawScore}%`,
+      metadata: {
+        score: evaluation.rawScore,
+        xp: evaluation.xpScore,
+        badge: evaluation.badge,
+        level: evaluation.estimatedLevel,
+      },
+    })
+
     await admin
       .from('crm_notes')
       .insert({
         lead_id: typedAttempt.lead_id,
         note: `English Quest terminé : ${evaluation.badge} (${evaluation.estimatedLevel}), score ${evaluation.rawScore}%, ${evaluation.xpScore} XP.`,
       })
+
+    recommendedLabel = await recommendClassForLead(typedAttempt.lead_id)
+
+    if (recommendedLabel) {
+      await admin
+        .from('placement_attempts')
+        .update({
+          recommended_class: recommendedLabel,
+        })
+        .eq('id', attemptId)
+    }
 
     const messageText = buildPlacementTestCompletedMessage({
       fullName: typedAttempt.full_name,
@@ -355,7 +501,7 @@ export async function completeEnglishQuest(attemptId: string) {
       xp: evaluation.xpScore,
       badge: evaluation.badge,
       level: evaluation.estimatedLevel,
-      recommendedClass: evaluation.recommendedClass,
+      recommendedClass: recommendedLabel || evaluation.recommendedClass,
     })
 
     const result = await sendTelegramMessage(messageText)
@@ -366,6 +512,17 @@ export async function completeEnglishQuest(attemptId: string) {
       messageText,
       result,
     })
+
+    await logCrmActivity(admin, {
+      lead_id: typedAttempt.lead_id,
+      activity_type: 'telegram_alert',
+      title: 'Telegram alert sent',
+      detail: result.ok ? 'Quest completion alert sent successfully.' : result.error || 'Telegram alert failed.',
+      metadata: {
+        ok: result.ok,
+        recommended_class: recommendedLabel || evaluation.recommendedClass,
+      },
+    })
   }
 
   return {
@@ -375,7 +532,7 @@ export async function completeEnglishQuest(attemptId: string) {
       xp: evaluation.xpScore,
       badge: evaluation.badge,
       estimatedLevel: evaluation.estimatedLevel,
-      recommendedClass: evaluation.recommendedClass,
+      recommendedClass: recommendedLabel || evaluation.recommendedClass,
       bestStreak: evaluation.bestStreak,
       summary: evaluation.summary,
       completedAt,

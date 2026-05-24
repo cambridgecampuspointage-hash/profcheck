@@ -12,6 +12,7 @@ import {
   Settings,
   Users,
 } from 'lucide-react'
+import { AdminAiWidget } from '@/components/ai/AdminAiWidget'
 import { BrandShell, type BrandNavItem } from '@/components/brand-shell'
 import { getPendingCorrectionRequestsCount } from '@/lib/actions'
 
@@ -39,6 +40,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       sectionLabel="Administration"
       notificationCount={pendingCount}
       notificationHref="/admin/attendance"
+      floatingAssistant={<AdminAiWidget />}
     >
       {children}
     </BrandShell>
