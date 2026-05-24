@@ -2692,7 +2692,16 @@ export async function getCrmSmartFollowups(): Promise<CrmSmartFollowup[]> {
     })
   })
 
-  const attendanceRows = (attendanceRes.data || []) as Array<{ student_id: string; attendance_date: string; status: 'absent'; student: Student | null }>
+  const attendanceRows = (attendanceRes.data || []).map((row) => {
+    const student = Array.isArray(row.student) ? row.student[0] ?? null : row.student ?? null
+
+    return {
+      student_id: row.student_id as string,
+      attendance_date: row.attendance_date as string,
+      status: 'absent' as const,
+      student: student as Student | null,
+    }
+  })
   const absenceCount = new Map<string, { count: number; student: Student | null }>()
   attendanceRows.forEach((row) => {
     const current = absenceCount.get(row.student_id) || { count: 0, student: row.student }
