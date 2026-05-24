@@ -1,6 +1,12 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getDateRanges } from '@/lib/utils'
 
+export type AiFeatureContext = {
+  context: string
+  shouldGenerate: boolean
+  emptyMessage: string
+}
+
 export async function buildReceptionBriefingContext() {
   const admin = createAdminClient()
   const today = new Date()
@@ -30,19 +36,31 @@ export async function buildReceptionBriefingContext() {
   const overtimeBreaks = attendance.filter((row) => (row.break_overtime_minutes || 0) > 0).length
   const absentCount = Math.max(0, profiles.length - attendance.length)
   const crmRelances = smartFollowups.filter((row) => row.activity_type === 'follow_up_reminder').length
+  const shouldGenerate =
+    schedules.length > 0 ||
+    attendance.length > 0 ||
+    lateCount > 0 ||
+    missingClockOut > 0 ||
+    overtimeBreaks > 0 ||
+    absentCount > 0 ||
+    crmRelances > 0
 
-  return [
-    `Date: ${dateKey}`,
-    `Réceptionnistes actives: ${profiles.length}`,
-    `Pointages du jour: ${attendance.length}`,
-    `Absences estimées: ${absentCount}`,
-    `Retards du jour: ${lateCount}`,
-    `Sorties manquantes: ${missingClockOut}`,
-    `Pauses longues: ${overtimeBreaks}`,
-    `Créneaux planifiés: ${schedules.length}`,
-    `Relances CRM créées sur 24h: ${crmRelances}`,
-    `Début du mois pour analyse RH: ${monthStart}`,
-  ].join('\n')
+  return {
+    context: [
+      `Date: ${dateKey}`,
+      `Réceptionnistes actives: ${profiles.length}`,
+      `Pointages du jour: ${attendance.length}`,
+      `Absences estimées: ${absentCount}`,
+      `Retards du jour: ${lateCount}`,
+      `Sorties manquantes: ${missingClockOut}`,
+      `Pauses longues: ${overtimeBreaks}`,
+      `Créneaux planifiés: ${schedules.length}`,
+      `Relances CRM créées sur 24h: ${crmRelances}`,
+      `Début du mois pour analyse RH: ${monthStart}`,
+    ].join('\n'),
+    shouldGenerate,
+    emptyMessage: 'Aucun briefing utile pour aujourd’hui. Pas de planning réception ni d’écart opérationnel détecté.',
+  } satisfies AiFeatureContext
 }
 
 export async function buildTeacherNotesContext(userId: string) {
@@ -106,12 +124,16 @@ export async function buildAlertsSummaryContext() {
     ].join('\n')
   })
 
-  return [
-    `Fenêtre analysée: 7 jours`,
-    `Nombre d’alertes: ${rows.length}`,
-    '',
-    rows.join('\n\n---\n\n'),
-  ].join('\n')
+  return {
+    context: [
+      `Fenêtre analysée: 7 jours`,
+      `Nombre d’alertes: ${rows.length}`,
+      '',
+      rows.join('\n\n---\n\n'),
+    ].join('\n'),
+    shouldGenerate: rows.length > 0,
+    emptyMessage: 'Aucune alerte Telegram récente à analyser sur les 7 derniers jours.',
+  } satisfies AiFeatureContext
 }
 
 export async function buildDashboardAnomaliesContext() {
@@ -132,19 +154,35 @@ export async function buildDashboardAnomaliesContext() {
   const overdueTasks = (followupsRes.data || []).filter((row) => new Date(row.due_at).getTime() < now.getTime()).length
   const completedToday = (attendanceRes.data || []).filter((row) => row.status === 'completed').length
   const activeToday = (attendanceRes.data || []).filter((row) => row.status === 'active').length
+  const plannedToday = (plannedRes.data || []).length
+  const pendingCorrections = (correctionsRes.data || []).length
+  const hotLeads = (hotLeadsRes.data || []).length
+  const paymentCases = (paymentRes.data || []).length
+  const shouldGenerate =
+    plannedToday > 0 ||
+    completedToday > 0 ||
+    activeToday > 0 ||
+    pendingCorrections > 0 ||
+    hotLeads > 0 ||
+    overdueTasks > 0 ||
+    paymentCases > 0
 
-  return [
-    `Date: ${todayKey}`,
-    `Planned sessions today: ${(plannedRes.data || []).length}`,
-    `Completed attendance sessions today: ${completedToday}`,
-    `Active attendance sessions today: ${activeToday}`,
-    `Pending correction requests: ${(correctionsRes.data || []).length}`,
-    `CRM hot leads: ${(hotLeadsRes.data || []).length}`,
-    `Overdue CRM tasks: ${overdueTasks}`,
-    `Payment follow-up cases: ${(paymentRes.data || []).length}`,
-    `Week start: ${startOfWeek}`,
-    `Month start: ${startOfMonth}`,
-  ].join('\n')
+  return {
+    context: [
+      `Date: ${todayKey}`,
+      `Planned sessions today: ${plannedToday}`,
+      `Completed attendance sessions today: ${completedToday}`,
+      `Active attendance sessions today: ${activeToday}`,
+      `Pending correction requests: ${pendingCorrections}`,
+      `CRM hot leads: ${hotLeads}`,
+      `Overdue CRM tasks: ${overdueTasks}`,
+      `Payment follow-up cases: ${paymentCases}`,
+      `Week start: ${startOfWeek}`,
+      `Month start: ${startOfMonth}`,
+    ].join('\n'),
+    shouldGenerate,
+    emptyMessage: 'Aucune analyse utile pour aujourd’hui. Aucun planning, écart critique CRM ou cas de recouvrement détecté.',
+  } satisfies AiFeatureContext
 }
 
 export async function buildAdminChatContext(mode: string) {

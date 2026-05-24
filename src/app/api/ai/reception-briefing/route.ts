@@ -13,10 +13,19 @@ export async function GET(request: Request) {
   try {
     const force = new URL(request.url).searchParams.get('force') === '1'
     const context = await buildReceptionBriefingContext()
+    if (!context.shouldGenerate) {
+      return NextResponse.json({
+        ok: true,
+        text: context.emptyMessage,
+        cached: false,
+        skipped: true,
+      })
+    }
+
     const result = await generateAiText({
       feature: 'reception_briefing',
       system: 'Tu es un assistant réception pour Cambridge Campus. Tu produis des briefings courts et utiles en français.',
-      prompt: buildReceptionBriefingPrompt(context),
+      prompt: buildReceptionBriefingPrompt(context.context),
       promptSummary: 'daily reception briefing',
       referenceType: 'reception_dashboard',
       referenceId: 'today',

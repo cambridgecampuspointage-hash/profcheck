@@ -13,10 +13,19 @@ export async function GET(request: Request) {
   try {
     const force = new URL(request.url).searchParams.get('force') === '1'
     const context = await buildAlertsSummaryContext()
+    if (!context.shouldGenerate) {
+      return NextResponse.json({
+        ok: true,
+        text: context.emptyMessage,
+        cached: false,
+        skipped: true,
+      })
+    }
+
     const result = await generateAiText({
       feature: 'alerts_summary',
       system: 'Tu es un assistant admin qui résume la santé du système d’alertes Telegram.',
-      prompt: buildAlertsSummaryPrompt(context),
+      prompt: buildAlertsSummaryPrompt(context.context),
       promptSummary: 'telegram alerts summary',
       referenceType: 'telegram_alerts',
       referenceId: 'last_7_days',

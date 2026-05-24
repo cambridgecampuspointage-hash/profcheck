@@ -13,10 +13,19 @@ export async function GET(request: Request) {
   try {
     const force = new URL(request.url).searchParams.get('force') === '1'
     const context = await buildDashboardAnomaliesContext()
+    if (!context.shouldGenerate) {
+      return NextResponse.json({
+        ok: true,
+        text: context.emptyMessage,
+        cached: false,
+        skipped: true,
+      })
+    }
+
     const result = await generateAiText({
       feature: 'dashboard_anomalies',
       system: 'Tu es un analyste opérationnel senior pour un centre de langues. Tu détectes les anomalies et proposes des actions nettes.',
-      prompt: buildDashboardAnomaliesPrompt(context),
+      prompt: buildDashboardAnomaliesPrompt(context.context),
       promptSummary: 'dashboard anomalies summary',
       referenceType: 'admin_dashboard',
       referenceId: 'today',
