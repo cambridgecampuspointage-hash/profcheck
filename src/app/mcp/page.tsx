@@ -68,7 +68,7 @@ const configs = [
     "authorization_type": "bearer"
   }
 }`,
-    note: 'Dans ChatGPT → Explore GPTs → Create → Configure → Add Action, collez l\'URL : https://profcheck.vercel.app/openapi.json',
+    note: 'Dans ChatGPT → Explore GPTs → Create → Configure → Add Action, collez l\'URL : https://profcheck.vercel.app/openapi.json. Lors de la première utilisation, ChatGPT vous demandera votre token MCP — copiez-le depuis la section ci-dessus.',
   },
   {
     id: 'other', name: 'Autre outil', short: 'M',
