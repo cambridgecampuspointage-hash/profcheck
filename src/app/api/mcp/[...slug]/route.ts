@@ -115,7 +115,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   if (path === 'debug') return handler(req)
 
   const authHeader = req.headers.get('authorization') || ''
-  const token = authHeader.replace(/^Bearer\s+/i, '').trim()
+  let token = ''
+  if (/^Bearer\s+/i.test(authHeader)) {
+    token = authHeader.replace(/^Bearer\s+/i, '').trim()
+  } else if (/^Basic\s+/i.test(authHeader)) {
+    const b64 = authHeader.replace(/^Basic\s+/i, '').trim()
+    try {
+      const decoded = atob(b64)
+      token = decoded.includes(':') ? decoded.split(':').pop()!.trim() : decoded.trim()
+    } catch { token = '' }
+  }
   const profileId = await validateToken(token)
   if (!profileId) {
     const prefix = token.length > 8 ? token.slice(0, 8) + '...' : '(vide)'
