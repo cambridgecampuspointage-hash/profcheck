@@ -12,6 +12,29 @@
     }
   ],
   "paths": {
+    "/api/mcp/debug": {
+      "get": {
+        "summary": "Debug — vérifier l'authentification",
+        "operationId": "debugAuth",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Infos de debug sur l'authentification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "has_auth_header": { "type": "boolean" },
+                    "token_prefix": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/mcp/teachers": {
       "get": {
         "summary": "Liste des enseignants",

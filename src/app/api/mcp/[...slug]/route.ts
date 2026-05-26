@@ -30,6 +30,20 @@ async function validateToken(token: string) {
 }
 
 const handlers: Record<string, (req: NextRequest) => Promise<Response>> = {
+  debug: async (req) => {
+    const authHeader = req.headers.get('authorization') || ''
+    const token = authHeader.replace('Bearer ', '').trim()
+    const tokenFound = token.startsWith('pc_mcp_')
+    const tokenCheck = tokenFound ? await admin.from('mcp_tokens').select('id, is_active').eq('token', token).maybeSingle() : null
+    return okRes({
+      has_auth_header: !!authHeader,
+      token_prefix: token.slice(0, 10) + '...' || '(empty)',
+      token_starts_with_pc_mcp: tokenFound,
+      token_in_db: tokenCheck?.data ? true : false,
+      token_is_active: tokenCheck?.data?.is_active ?? false,
+      all_headers: Object.fromEntries(req.headers.entries()),
+    })
+  },
   teachers: async (req) => {
     const { data, error } = await admin.from('teachers').select('*').order('full_name')
     if (error) return errorRes(error.message)
