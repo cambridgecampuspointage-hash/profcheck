@@ -105,15 +105,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   const { slug } = await params
   const path = slug.join('/')
 
+  const handler = handlers[path]
+  if (!handler) return errorRes(`Endpoint inconnu: ${path}`, 404)
+
+  if (path === 'debug') return handler(req)
+
   const authHeader = req.headers.get('authorization') || ''
   const token = authHeader.replace('Bearer ', '').trim()
   const profileId = await validateToken(token)
   if (!profileId) {
     return errorRes('Token MCP invalide ou révoqué — générez-en un depuis le tableau de bord', 401)
   }
-
-  const handler = handlers[path]
-  if (!handler) return errorRes(`Endpoint inconnu: ${path}`, 404)
 
   return handler(req)
 }
