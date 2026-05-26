@@ -34,7 +34,7 @@ export async function updateSession(request: NextRequest) {
   const demoRole = request.cookies.get('demo-role')?.value || 'admin'
   const { pathname } = request.nextUrl
 
-  if (pathname.startsWith('/api/alerts/') || pathname.startsWith('/api/placement/')) {
+  if (pathname.startsWith('/api/alerts/') || pathname.startsWith('/api/placement/') || pathname.startsWith('/api/mcp/')) {
     return supabaseResponse
   }
 
