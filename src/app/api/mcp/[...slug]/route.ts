@@ -29,6 +29,58 @@ async function validateToken(token: string) {
   return data.profile_id
 }
 
+const postHandlers: Record<string, (req: NextRequest) => Promise<Response>> = {
+  'planned-sessions': async (req) => {
+    const body = await req.json().catch(() => ({}))
+    const { action, center_id, room_id, teacher_id, scheduled_date, start_time, end_time, status, session_id, name } = body
+    if (action === 'create') {
+      if (!center_id || !scheduled_date || !start_time) {
+        return errorRes('Champs requis : center_id, scheduled_date, start_time')
+      }
+      const { data, error } = await admin.from('planned_sessions').insert({
+        center_id, teacher_id: teacher_id || null, scheduled_date, start_time,
+        end_time: end_time || null, status: status || 'scheduled', name: name || null,
+      }).select('*, teacher:teachers(full_name), room:rooms(name), campus:centers(name)').single()
+      if (error) return errorRes(error.message)
+      return okRes(data)
+    }
+    if (action === 'assign-teacher' || action === 'update') {
+      if (!session_id && !body.id) return errorRes('session_id requis')
+      const id = session_id || body.id
+      const updates: Record<string, unknown> = {}
+      if (teacher_id !== undefined) updates.teacher_id = teacher_id
+      if (room_id !== undefined) updates.room_id = room_id
+      if (scheduled_date !== undefined) updates.scheduled_date = scheduled_date
+      if (start_time !== undefined) updates.start_time = start_time
+      if (end_time !== undefined) updates.end_time = end_time
+      if (status !== undefined) updates.status = status
+      if (Object.keys(updates).length === 0) return errorRes('Aucun champ à mettre à jour')
+      const { data, error } = await admin.from('planned_sessions').update(updates).eq('id', id).select('*, teacher:teachers(full_name), room:rooms(name), campus:centers(name)').single()
+      if (error) return errorRes(error.message)
+      return okRes(data)
+    }
+    return errorRes("action doit être 'create' ou 'update'")
+  },
+  teachers: async (req) => {
+    const body = await req.json().catch(() => ({}))
+    const { action, full_name, email, phone, languages, hourly_rate } = body
+    if (action !== 'create') return errorRes("action doit être 'create'")
+    if (!full_name || !email) return errorRes('Champs requis : full_name, email')
+    const crypto = require('crypto')
+    const tempPassword = crypto.randomBytes(16).toString('hex')
+    const { data: authUser, error: authError } = await admin.auth.admin.createUser({
+      email, password: tempPassword, email_confirm: true,
+      user_metadata: { full_name, role: 'teacher' },
+    })
+    if (authError) return errorRes(authError.message)
+    await admin.from('teachers').update({
+      full_name, phone: phone || null, languages: languages || [],
+      hourly_rate: hourly_rate || 0,
+    }).eq('user_id', authUser.user.id)
+    return okRes({ success: true, teacher_id: authUser.user.id, temp_password: tempPassword })
+  },
+}
+
 const handlers: Record<string, (req: NextRequest) => Promise<Response>> = {
   ping: async (req) => {
     const authHeader = req.headers.get('authorization') || ''
@@ -113,6 +165,33 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   if (!handler) return errorRes(`Endpoint inconnu: ${path}`, 404)
 
   if (path === 'debug') return handler(req)
+
+  const authHeader = req.headers.get('authorization') || ''
+  let token = ''
+  if (/^Bearer\s+/i.test(authHeader)) {
+    token = authHeader.replace(/^Bearer\s+/i, '').trim()
+  } else if (/^Basic\s+/i.test(authHeader)) {
+    const b64 = authHeader.replace(/^Basic\s+/i, '').trim()
+    try {
+      const decoded = atob(b64)
+      token = decoded.includes(':') ? decoded.split(':').pop()!.trim() : decoded.trim()
+    } catch { token = '' }
+  }
+  const profileId = await validateToken(token)
+  if (!profileId) {
+    const prefix = token.length > 8 ? token.slice(0, 8) + '...' : '(vide)'
+    return errorRes(`Token MCP invalide ou révoqué (reçu: ${prefix}) — générez-en un depuis le tableau de bord`, 401)
+  }
+
+  return handler(req)
+}
+
+export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string[] }> }) {
+  const { slug } = await params
+  const path = slug.join('/')
+
+  const handler = postHandlers[path]
+  if (!handler) return errorRes(`Endpoint POST inconnu: ${path}`, 404)
 
   const authHeader = req.headers.get('authorization') || ''
   let token = ''

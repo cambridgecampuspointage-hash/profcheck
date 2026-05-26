@@ -188,6 +188,42 @@
             }
           }
         }
+      },
+      "post": {
+        "summary": "Créer ou modifier une session planifiée",
+        "operationId": "writePlannedSession",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": { "type": "string", "enum": ["create", "update"], "description": "create ou update" },
+                  "center_id": { "type": "string", "description": "Requis pour create" },
+                  "teacher_id": { "type": "string", "description": "ID du professeur à assigner" },
+                  "room_id": { "type": "string" },
+                  "scheduled_date": { "type": "string", "format": "date", "description": "Requis pour create" },
+                  "start_time": { "type": "string", "description": "Requis pour create. Format: HH:mm:ss" },
+                  "end_time": { "type": "string", "description": "Format: HH:mm:ss" },
+                  "status": { "type": "string", "default": "scheduled" },
+                  "session_id": { "type": "string", "description": "Requis pour update" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session créée ou modifiée",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PlannedSession" }
+              }
+            }
+          }
+        }
       }
     },
     "/api/mcp/rooms": {
