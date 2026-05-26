@@ -111,7 +111,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   if (path === 'debug') return handler(req)
 
   const authHeader = req.headers.get('authorization') || ''
-  const token = authHeader.replace('Bearer ', '').trim()
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim()
   const profileId = await validateToken(token)
   if (!profileId) {
     return errorRes('Token MCP invalide ou révoqué — générez-en un depuis le tableau de bord', 401)
