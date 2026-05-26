@@ -3614,3 +3614,79 @@ export async function deleteStudentPaymentRecord(recordId: string) {
   if (error) return { error: error.message }
   return { success: true }
 }
+
+// ─── MCP TOKENS ──────────────────────────────────────────────────────────────
+
+export interface McpToken {
+  id: string
+  profile_id: string
+  name: string
+  token: string
+  is_active: boolean
+  last_used_at: string | null
+  expires_at: string | null
+  created_at: string
+}
+
+export async function listMcpTokens(): Promise<McpToken[]> {
+  const { user } = await getSessionContext()
+  if (!user) return []
+
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from('mcp_tokens')
+    .select('*')
+    .eq('profile_id', user.id)
+    .order('created_at', { ascending: false })
+
+  return (data || []) as McpToken[]
+}
+
+export async function generateMcpToken(name?: string) {
+  const { user, role } = await getSessionContext()
+  if (!user) return { error: 'Non authentifié' }
+
+  const crypto = await import('crypto')
+  const raw = crypto.randomBytes(32).toString('hex')
+  const token = `pc_mcp_${raw}`
+
+  const admin = createAdminClient()
+  const { data, error } = await admin
+    .from('mcp_tokens')
+    .insert({ profile_id: user.id, name: name?.trim() || 'default', token })
+    .select()
+    .single()
+
+  if (error) return { error: error.message }
+  return { data: data as McpToken }
+}
+
+export async function revokeMcpToken(tokenId: string) {
+  const { user } = await getSessionContext()
+  if (!user) return { error: 'Non authentifié' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('mcp_tokens')
+    .update({ is_active: false })
+    .eq('id', tokenId)
+    .eq('profile_id', user.id)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+export async function deleteMcpToken(tokenId: string) {
+  const { user } = await getSessionContext()
+  if (!user) return { error: 'Non authentifié' }
+
+  const admin = createAdminClient()
+  const { error } = await admin
+    .from('mcp_tokens')
+    .delete()
+    .eq('id', tokenId)
+    .eq('profile_id', user.id)
+
+  if (error) return { error: error.message }
+  return { success: true }
+}

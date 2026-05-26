@@ -79,7 +79,7 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   // Public routes
-  const publicPaths = ['/login', '/forgot-password', '/reset-password', '/auth/callback', '/test']
+  const publicPaths = ['/login', '/forgot-password', '/reset-password', '/auth/callback', '/test', '/marketing', '/mcp']
   if (publicPaths.some((p) => pathname.startsWith(p))) {
     // If user is already logged in and visiting login, redirect to dashboard
     if (user && (pathname === '/login' || pathname === '/forgot-password')) {

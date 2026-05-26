@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getAppSettings, getCenters, createCenter, updateAppSettings, updateCenter } from '@/lib/actions'
+import { getAppSettings, getCenters, createCenter, updateAppSettings, updateCenter, listMcpTokens, generateMcpToken, revokeMcpToken, deleteMcpToken } from '@/lib/actions'
 import type { AppSettings, Center } from '@/lib/types'
-import { Edit2, Settings as SettingsIcon, MapPin, Plus, X, Loader2 } from 'lucide-react'
+import type { McpToken } from '@/lib/actions'
+import { Edit2, Settings as SettingsIcon, MapPin, Plus, X, Loader2, Key, Copy, Check, Power, Trash2 } from 'lucide-react'
 import { LocationMap } from '@/components/ui/expand-map'
 
 function formatCoordinates(latitude: number, longitude: number) {
@@ -21,6 +22,11 @@ export default function SettingsPage() {
   const [togglingCenterId, setTogglingCenterId] = useState<string | null>(null)
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null)
   const [savingAppSettings, setSavingAppSettings] = useState(false)
+  const [mcpTokens, setMcpTokens] = useState<McpToken[]>([])
+  const [mcpLoading, setMcpLoading] = useState(true)
+  const [mcpGenerating, setMcpGenerating] = useState(false)
+  const [mcpNewToken, setMcpNewToken] = useState<string | null>(null)
+  const [mcpCopied, setMcpCopied] = useState<string | null>(null)
 
   const fetchCenters = async () => {
     setLoading(true)
@@ -28,6 +34,13 @@ export default function SettingsPage() {
     setCenters(centerData as Center[])
     setAppSettings(settingsData as AppSettings | null)
     setLoading(false)
+  }
+
+  const fetchMcpTokens = async () => {
+    setMcpLoading(true)
+    const tokens = await listMcpTokens()
+    setMcpTokens(tokens)
+    setMcpLoading(false)
   }
 
   useEffect(() => {
@@ -42,11 +55,39 @@ export default function SettingsPage() {
     }
 
     void loadCenters()
+    void fetchMcpTokens()
 
     return () => {
       active = false
     }
   }, [])
+
+  const handleMcpGenerate = async () => {
+    setMcpGenerating(true)
+    setMcpNewToken(null)
+    const result = await generateMcpToken('default')
+    setMcpGenerating(false)
+    if (result.data) {
+      setMcpNewToken(result.data.token)
+      void fetchMcpTokens()
+    }
+  }
+
+  const handleMcpRevoke = async (id: string) => {
+    await revokeMcpToken(id)
+    void fetchMcpTokens()
+  }
+
+  const handleMcpDelete = async (id: string) => {
+    await deleteMcpToken(id)
+    void fetchMcpTokens()
+  }
+
+  const mcpCopy = (value: string) => {
+    navigator.clipboard.writeText(value)
+    setMcpCopied(value)
+    setTimeout(() => setMcpCopied(null), 2000)
+  }
 
   const toggleGpsVerification = async (center: Center) => {
     setTogglingCenterId(center.id)
@@ -191,6 +232,83 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* MCP Tokens */}
+      <div className="card" style={{ marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>
+          <Key size={16} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 6 }} />
+          Tokens MCP
+        </h2>
+        <p style={{ fontSize: '0.8125rem', color: '#64748b', marginBottom: '1rem' }}>
+          Gérez vos tokens d&apos;accès pour connecter les assistants IA à ProfCheck.
+        </p>
+
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+          <button className="btn btn-primary btn-sm" onClick={handleMcpGenerate} disabled={mcpGenerating}>
+            {mcpGenerating ? 'Génération...' : 'Générer un token'}
+          </button>
+          <a href="/mcp" className="btn btn-secondary btn-sm" style={{ textDecoration: 'none' }}>
+            Comment configurer
+          </a>
+        </div>
+
+        {mcpNewToken && (
+          <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 10, padding: '0.75rem', marginBottom: '1rem' }}>
+            <p style={{ fontSize: '0.75rem', fontWeight: 700, color: '#065f46', marginBottom: '0.5rem' }}>
+              Nouveau token — copiez-le maintenant, il ne sera plus jamais affiché
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <code style={{ flex: 1, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, padding: '0.5rem 0.75rem', fontSize: '0.75rem', fontFamily: 'monospace', wordBreak: 'break-all' }}>
+                {mcpNewToken}
+              </code>
+              <button className="btn btn-sm btn-secondary" onClick={() => mcpCopy(mcpNewToken)}>
+                {mcpCopied === mcpNewToken ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {mcpLoading ? (
+          <div style={{ textAlign: 'center', padding: '1rem', color: '#94a3b8', fontSize: '0.875rem' }}>Chargement...</div>
+        ) : mcpTokens.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '1rem', color: '#94a3b8', fontSize: '0.875rem' }}>
+            Aucun token. Créez-en un pour connecter vos outils IA.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {mcpTokens.map((t) => (
+              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem', background: '#f8fafc', borderRadius: 10 }}>
+                <Key size={18} style={{ color: t.is_active ? '#0f766e' : '#94a3b8', flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.875rem' }}>{t.name}</span>
+                    {t.is_active ? (
+                      <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#0f766e', background: '#d1fae5', padding: '0.125rem 0.5rem', borderRadius: 999 }}>Actif</span>
+                    ) : (
+                      <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', background: '#f1f5f9', padding: '0.125rem 0.5rem', borderRadius: 999 }}>Révoqué</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.125rem' }}>
+                    Créé le {new Date(t.created_at).toLocaleDateString('fr-FR')}
+                    {t.last_used_at && ` · Dernière utilisation : ${new Date(t.last_used_at).toLocaleDateString('fr-FR')}`}
+                  </div>
+                </div>
+                <button className="btn btn-sm btn-secondary" onClick={() => mcpCopy(t.token)} title="Copier">
+                  {mcpCopied === t.token ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+                {t.is_active && (
+                  <button className="btn btn-sm" onClick={() => handleMcpRevoke(t.id)} style={{ background: 'rgba(245,158,11,0.1)', color: '#92400e', border: '1px solid rgba(245,158,11,0.2)' }} title="Révoquer">
+                    <Power size={14} />
+                  </button>
+                )}
+                <button className="btn btn-sm" onClick={() => handleMcpDelete(t.id)} style={{ background: 'rgba(239,68,68,0.08)', color: '#991b1b', border: '1px solid rgba(239,68,68,0.15)' }} title="Supprimer">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* App Info */}

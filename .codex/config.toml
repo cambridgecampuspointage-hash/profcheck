@@ -2,3 +2,9 @@
 url = "https://mcp.supabase.com/mcp?project_ref=jubttwbvyuqpbxpzpjoe&read_only=true"
 enabled = true
 tool_timeout_sec = 60
+
+[mcp_servers.profcheck]
+command = "node"
+args = ["mcp-server.js"]
+env = { NEXT_PUBLIC_SUPABASE_URL = "${NEXT_PUBLIC_SUPABASE_URL}", SUPABASE_SERVICE_ROLE_KEY = "${SUPABASE_SERVICE_ROLE_KEY}", MCP_TOKEN = "${MCP_TOKEN}" }
+enabled = true
