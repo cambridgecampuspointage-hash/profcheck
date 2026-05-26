@@ -30,6 +30,10 @@ async function validateToken(token: string) {
 }
 
 const handlers: Record<string, (req: NextRequest) => Promise<Response>> = {
+  ping: async (req) => {
+    const authHeader = req.headers.get('authorization') || ''
+    return okRes({ status: 'ok', auth_header_present: !!authHeader, auth_length: authHeader.length })
+  },
   debug: async (req) => {
     const authHeader = req.headers.get('authorization') || ''
     const token = authHeader.replace('Bearer ', '').trim()
@@ -114,7 +118,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ slug
   const token = authHeader.replace(/^Bearer\s+/i, '').trim()
   const profileId = await validateToken(token)
   if (!profileId) {
-    return errorRes('Token MCP invalide ou révoqué — générez-en un depuis le tableau de bord', 401)
+    const prefix = token.length > 8 ? token.slice(0, 8) + '...' : '(vide)'
+    return errorRes(`Token MCP invalide ou révoqué (reçu: ${prefix}) — générez-en un depuis le tableau de bord`, 401)
   }
 
   return handler(req)
